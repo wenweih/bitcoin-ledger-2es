@@ -15,12 +15,28 @@ type configure struct {
 	BitcoinPass       string
 	BitcoinhttpMode   bool
 	BitcoinDisableTLS bool
+	ElasticURL        string
+	ElasticSniff      bool
 }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "bitcoin-service",
 	Short: "Bitcoin middleware for application",
+}
+
+var accountCmd = &cobra.Command{
+	Use:   "genaccount",
+	Short: "Generate Bitcoin account",
+	Run: func(cmd *cobra.Command, args []string) {
+	},
+}
+
+var sync = &cobra.Command{
+	Use:   "genaccount",
+	Short: "Generate Bitcoin account",
+	Run: func(cmd *cobra.Command, args []string) {
+	},
 }
 
 // Execute 命令行入口
@@ -63,6 +79,11 @@ func (conf *configure) InitConfig() {
 			conf.BitcoinhttpMode = value.(bool)
 		case "btc_disable_tls":
 			conf.BitcoinDisableTLS = value.(bool)
+		case "elastic_url":
+			conf.ElasticURL = value.(string)
+		case "elastic_sniff":
+			conf.ElasticSniff = value.(bool)
+
 		}
 	}
 }
