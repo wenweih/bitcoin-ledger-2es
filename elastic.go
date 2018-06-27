@@ -151,6 +151,109 @@ const blockMapping = `
   }
 }`
 
+const txMapping = `
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+		"tx": {
+      "properties": {
+        "txid": {
+          "type": "text"
+        },
+        "fee": {
+          "type": "double"
+        },
+				"blockhash": {
+					"type": "text"
+				},
+        "vins": {
+          "type": "nested",
+          "properties": {
+            "address": {
+              "type": "text"
+            },
+            "value": {
+              "type": "double"
+            }
+          }
+        },
+        "vouts": {
+          "type": "nested",
+          "properties": {
+            "address": {
+              "type": "text"
+            },
+            "value": {
+              "type": "double"
+            }
+          }
+        },
+        "time": {
+          "type": "long"
+        }
+      }
+    }
+  }
+}`
+
+const voutMapping = `
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+		"vout": {
+      "properties": {
+        "txidbelongto": {
+          "type": "text"
+        },
+        "value": {
+          "type": "double"
+        },
+        "voutindex": {
+          "type": "short"
+        },
+        "coinbase": {
+          "type": "boolean"
+        },
+        "addresses": {
+          "type":"keyword"
+        },
+				"time": {
+					"type": "long"
+				},
+        "used": {
+          "type":"object"
+        }
+      }
+    }
+  }
+}`
+
+const balanceMapping = `
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+		"balance": {
+			"properties": {
+				"address": {
+					"type":"keyword"
+				},
+				"amount": {
+					"type": "double"
+				}
+			}
+		}
+  }
+}`
+
 func (conf configure) elasticClient() (*elasticClientAlias, error) {
 	client, err := elastic.NewClient(elastic.SetURL(conf.ElasticURL),
 		elastic.SetSniff(conf.ElasticSniff))
@@ -163,9 +266,19 @@ func (conf configure) elasticClient() (*elasticClientAlias, error) {
 
 func (client *elasticClientAlias) createIndices() {
 	ctx := context.Background()
-
 	for _, index := range []string{"block", "tx", "vout", "balance"} {
-		result, err := client.CreateIndex(index).BodyString(blockMapping).Do(ctx)
+		var mapping string
+		switch index {
+		case "block":
+			mapping = blockMapping
+		case "tx":
+			mapping = txMapping
+		case "vout":
+			mapping = voutMapping
+		case "balance":
+			mapping = balanceMapping
+		}
+		result, err := client.CreateIndex(index).BodyString(mapping).Do(ctx)
 		if err != nil {
 			continue
 		}
