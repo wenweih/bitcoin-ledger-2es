@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -42,6 +43,22 @@ var syncCmd = &cobra.Command{
 		}
 
 		eClient.createIndices()
+
+		c := config.bitcoinClient()
+		btcClient := bitcoinClientAlias{c}
+		info, err := btcClient.GetBlockChainInfo()
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+		var DBCurrentHeight float64
+		if agg, err := eClient.MaxAgg("height", "block", "block"); err != nil {
+			btcClient.BTCReSetSync(info.Headers, eClient)
+		} else {
+			DBCurrentHeight = *agg
+		}
+
+		syncIndex := strconv.FormatFloat(DBCurrentHeight-5, 'f', -1, 64)
+
 	},
 }
 

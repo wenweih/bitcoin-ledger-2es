@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/olivere/elastic"
@@ -286,4 +287,29 @@ func (client *elasticClientAlias) createIndices() {
 			log.Infoln(strings.Join([]string{"Create index:", result.Index}, ""))
 		}
 	}
+}
+
+func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float64, error) {
+	ctx := context.Background()
+	hightestAgg := elastic.NewMaxAggregation().Field(field)
+	aggKey := strings.Join([]string{"max", field}, "_")
+	// Get Query params https://github.com/olivere/elastic/blob/release-branch.v6/search_aggs_metrics_max_test.go
+	// https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-aggregations-metrics-max-aggregation.html
+	// src, _ := hightestAgg.Source()
+	// data, _ := json.Marshal(src)
+	// fmt.Printf(string(data))
+	searchResult, err := client.Search().
+		Index(index).Type(typeName).
+		Query(elastic.NewMatchAllQuery()).
+		Aggregation(aggKey, hightestAgg).
+		Do(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+	maxAggRes, found := searchResult.Aggregations.Max(aggKey)
+	if !found || maxAggRes.Value == nil {
+		return nil, errors.New(strings.Join([]string{"max", field, "in", index, typeName, "not found"}, " "))
+	}
+	return maxAggRes.Value, nil
 }

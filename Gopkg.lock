@@ -2,6 +2,60 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/aead/siphash"
+  packages = ["."]
+  revision = "e404fcfc888570cadd1610538e2dbc89f66af814"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/btcd"
+  packages = [".","addrmgr","blockchain","blockchain/indexers","btcec","btcjson","chaincfg","chaincfg/chainhash","connmgr","database","database/ffldb","database/internal/treap","limits","mempool","mining","mining/cpuminer","netsync","peer","txscript","wire"]
+  revision = "86fed781132ac890ee03e906e4ecd5d6fa180c64"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/btclog"
+  packages = ["."]
+  revision = "84c8d2346e9fc8c7b947e243b9c24e6df9fd206a"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/btcutil"
+  packages = [".","base58","bech32","bloom","gcs","gcs/builder"]
+  revision = "d4cc87b860166d00d6b5b9e0d3b3d71d6088d4d4"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/go-socks"
+  packages = ["socks"]
+  revision = "4720035b7bfd2a9bb130b1c184f8bbe41b6f0d0f"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/goleveldb"
+  packages = ["leveldb","leveldb/cache","leveldb/comparer","leveldb/errors","leveldb/filter","leveldb/iterator","leveldb/journal","leveldb/memdb","leveldb/opt","leveldb/storage","leveldb/table","leveldb/util"]
+  revision = "7834afc9e8cd15233b6c3d97e12674a31ca24602"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/snappy-go"
+  packages = ["."]
+  revision = "0bdef8d067237991ddaa1bb6072a740bc40601ba"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/websocket"
+  packages = ["."]
+  revision = "31079b6807923eb23992c421b114992b95131b55"
+
+[[projects]]
+  name = "github.com/btcsuite/winsvc"
+  packages = ["eventlog","mgr","registry","svc","winapi"]
+  revision = "f8fb11f83f7e860e3769a08e6811d1b399a43722"
+  version = "v1.0.0"
+
+[[projects]]
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
   revision = "346938d642f2ec3594ed81d874461961cd0faa76"
@@ -24,6 +78,24 @@
   packages = ["."]
   revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
   version = "v1.0"
+
+[[projects]]
+  name = "github.com/jessevdk/go-flags"
+  packages = ["."]
+  revision = "c6ca198ec95c841fdb89fc0de7496fed11ab854e"
+  version = "v1.4.0"
+
+[[projects]]
+  name = "github.com/jrick/logrotate"
+  packages = ["rotator"]
+  revision = "a93b200c26cbae3bb09dd0dc2c7c7fe1468a034a"
+  version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/kkdai/bstream"
+  packages = ["."]
+  revision = "f71540b9dfdcfe64dbf2818e9b66423c6aafcacd"
 
 [[projects]]
   name = "github.com/magiconair/properties"
@@ -124,7 +196,7 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
-  packages = ["ssh/terminal"]
+  packages = ["ripemd160","ssh/terminal"]
   revision = "a49355c7e3f8fe157a85be2f77e6e269a0f89602"
 
 [[projects]]
@@ -148,6 +220,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "bfa615bfe2f2c074337a37330734627622dbc56b670a4189630a8bea27d8bf09"
+  inputs-digest = "9839371dcb524d39f0f2c5494de26ffd63f7d0234c5f768354aef2be23f46e36"
   solver-name = "gps-cdcl"
   solver-version = 1
