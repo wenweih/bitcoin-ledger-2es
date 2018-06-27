@@ -32,10 +32,16 @@ var accountCmd = &cobra.Command{
 	},
 }
 
-var sync = &cobra.Command{
-	Use:   "genaccount",
-	Short: "Generate Bitcoin account",
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Parse bitcoin chaindata to elasticsearch",
 	Run: func(cmd *cobra.Command, args []string) {
+		eClient, err := config.elasticClient()
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+
+		eClient.createIndices()
 	},
 }
 
@@ -49,6 +55,7 @@ func Execute() {
 func init() {
 	config = new(configure)
 	config.InitConfig()
+	rootCmd.AddCommand(syncCmd)
 }
 
 func (conf *configure) InitConfig() {
