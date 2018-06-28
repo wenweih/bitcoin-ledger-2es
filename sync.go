@@ -36,34 +36,35 @@ func sync() {
 		btcClient.BTCReSetSync(info.Headers, eClient)
 	} else {
 		// 数据库倒退 5 个块再同步
-		// btcClient.BTCSync(ctx, index, int32(DBCurrentHeight-5), btcInfo.Headers, elasticClient)
+		ctx := context.Background()
+		btcClient.BTCSync(ctx, int32(DBCurrentHeight-5), info.Headers, eClient)
 	}
 }
 
-func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, index string, from, end int32, elasticClient elasticClientAlias) {
+func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, from, end int32, elasticClient *elasticClientAlias) {
 	for height := from; height < end; height++ {
 		blockHash, _ := btcClient.GetBlockHash(int64(height))
-		if block, err := btcClient.GetBlockVerboseTx(blockHash); err != nil {
+		if block, err := btcClient.GetBlockVerboseTxM(blockHash); err != nil {
 			log.Fatalf(err.Error())
 		} else {
 			// 这个地址交易数据比较明显， 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			elasticClient.BTCRollBackAndSyncTx(ctx, index, from, height, block)
-			elasticClient.BTCRollBackAndSyncBlock(ctx, index, from, height, block)
+			elasticClient.BTCRollBackAndSyncTx(ctx, from, height, block)
+			elasticClient.BTCRollBackAndSyncBlock(ctx, from, height, block)
 		}
 	}
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncBlock(ctx context.Context, index string, from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (client *elasticClientAlias) BTCRollBackAndSyncBlock(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
 	bodyParams := BTCBlockWithTxDetail(block)
 	if height < (from + 5) {
 		// https://github.com/olivere/elastic/blob/release-branch.v6/update_test.go
 		// https://www.elastic.co/guide/en/elasticsearch/reference/5.2/docs-update.html
 		DocParams := BTCBlockWithTxDetail(block)
-		client.Update().Index(index).Type("block").Id(strconv.FormatInt(int64(height), 10)).
+		client.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
 		fmt.Printf("sync update btc  %d %s\n", block.Height, block.Hash)
 	} else {
-		client.Index().Index(index).Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
+		client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
 		client.Flush()
 		fmt.Printf("sync btc  %d %s\n", block.Height, block.Hash)
 	}
