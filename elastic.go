@@ -444,7 +444,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		return err
 	}
 
-	for _, tx := range NewBlock.RawTx {
+	for _, tx := range NewBlock.Tx {
 		for _, vin := range tx.Vin {
 			if len(tx.Vin) == 1 && len(tx.Vin[0].Coinbase) != 0 && len(tx.Vin[0].Txid) == 0 {
 				continue // the vin is coinbase
@@ -509,7 +509,7 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 }
 
 func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
-	for _, tx := range block.RawTx {
+	for _, tx := range block.Tx {
 		var (
 			voutAmount    decimal.Decimal
 			vinAmount     decimal.Decimal

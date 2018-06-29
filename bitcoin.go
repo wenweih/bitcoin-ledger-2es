@@ -57,6 +57,7 @@ func (btcClient *bitcoinClientAlias) getBlock(height int32) (*btcjson.GetBlockVe
 		blockHash, err := btcClient.GetBlockHash(int64(height))
 		if err != nil {
 			close(blockHashCh)
+
 			complete <- false
 			return
 		}

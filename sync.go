@@ -82,7 +82,10 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
 		fmt.Printf("sync update btc  %d %s\n", block.Height, block.Hash)
 	} else {
-		client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
+		_, err := client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
+		if err != nil {
+			log.Fatalln("write doc error", err.Error())
+		}
 		client.Flush()
 		fmt.Printf("sync btc  %d %s\n", block.Height, block.Hash)
 	}
