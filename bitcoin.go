@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 	log "github.com/sirupsen/logrus"
 )
@@ -42,7 +44,48 @@ func (btcClient *bitcoinClientAlias) BTCReSetSync(hightest int32, elasticClient 
 	}
 
 	elasticClient.createIndices()
-	btcClient.BTCSync(ctx, int32(1), hightest, elasticClient)
+	// btcClient.BTCSync(ctx, int32(1), hightest, elasticClient)
+	btcClient.SyncConcurrency(int32(1), hightest, elasticClient)
+}
+
+func (btcClient *bitcoinClientAlias) getBlock(height int32) (*btcjson.GetBlockVerboseResult, error) {
+	complete := make(chan bool)
+	blockHashCh := make(chan *chainhash.Hash)
+	blockCh := make(chan *btcjson.GetBlockVerboseResult)
+	totalTask := 2
+	go func() {
+		blockHash, err := btcClient.GetBlockHash(int64(height))
+		if err != nil {
+			close(blockHashCh)
+			complete <- false
+			return
+		}
+		blockHashCh <- blockHash
+		complete <- true
+	}()
+
+	go func() {
+		hash, ok := <-blockHashCh
+		if ok {
+			block, err := btcClient.GetBlockVerboseTxM(hash)
+			if err != nil {
+				complete <- false
+				return
+			}
+			complete <- true
+			blockCh <- block
+		}
+	}()
+
+	for i := 0; i < totalTask; i++ {
+		result := <-complete
+		if !result {
+			return nil, errors.New(strings.Join([]string{"Get block error, number:", strconv.Itoa(int(height))}, ""))
+		}
+	}
+
+	block := <-blockCh
+	return block, nil
 }
 
 // BTCBalance type struct

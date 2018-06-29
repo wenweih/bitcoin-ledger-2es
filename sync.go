@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/btcsuite/btcd/btcjson"
 )
 
-func sync() {
+// Sync dump bitcoin chaindata to es
+func Sync() {
 	eClient, err := config.elasticClient()
 	if err != nil {
 		log.Fatalf(err.Error())
@@ -48,13 +50,29 @@ func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, from, end int3
 			log.Fatalf(err.Error())
 		} else {
 			// 这个地址交易数据比较明显， 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			elasticClient.BTCRollBackAndSyncTx(ctx, from, height, block)
-			elasticClient.BTCRollBackAndSyncBlock(ctx, from, height, block)
+			elasticClient.BTCRollBackAndSyncTx(from, height, block)
+			// elasticClient.BTCRollBackAndSyncBlock(from, height, block)
 		}
 	}
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncBlock(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
+
+	var wg sync.WaitGroup
+	for height := from; height < end; height++ {
+		block, err := btcClient.getBlock(height)
+		if err != nil {
+			log.Fatalln(err.Error())
+		} else {
+			wg.Add(1)
+			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, &wg)
+			wg.Wait()
+		}
+	}
+}
+
+func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+	ctx := context.Background()
 	bodyParams := BTCBlockWithTxDetail(block)
 	if height < (from + 5) {
 		// https://github.com/olivere/elastic/blob/release-branch.v6/update_test.go
@@ -68,4 +86,5 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(ctx context.Context, f
 		client.Flush()
 		fmt.Printf("sync btc  %d %s\n", block.Height, block.Hash)
 	}
+	wg.Done()
 }

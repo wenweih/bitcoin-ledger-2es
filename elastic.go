@@ -500,7 +500,8 @@ func (client *elasticClientAlias) UpdateBTCBlanceByVout(ctx context.Context, vou
 	return nil
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult) {
+	ctx := context.Background()
 	if height < (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}

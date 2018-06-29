@@ -36,7 +36,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Parse bitcoin chaindata to elasticsearch",
 	Run: func(cmd *cobra.Command, args []string) {
-		sync()
+		Sync()
 	},
 }
 
