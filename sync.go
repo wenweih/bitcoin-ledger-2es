@@ -42,20 +42,6 @@ func Sync() {
 	}
 }
 
-func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, from, end int32, elasticClient *elasticClientAlias) {
-	for height := from; height < end; height++ {
-		blockHash, _ := btcClient.GetBlockHash(int64(height))
-		if block, err := btcClient.GetBlockVerboseTxM(blockHash); err != nil {
-			log.Fatalf(err.Error())
-		} else {
-			// 这个地址交易数据比较明显， 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			// elasticClient.BTCRollBackAndSyncTx(from, height, block)
-			// elasticClient.BTCRollBackAndSyncBlock(from, height, block)
-			log.Infoln(block)
-		}
-	}
-}
-
 func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
 	for height := from; height < end; height++ {
 		block, err := btcClient.getBlock(height)
