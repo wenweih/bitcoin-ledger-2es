@@ -339,7 +339,7 @@ func (client *elasticClientAlias) FindVoutByVoutIndexAndBelongTxID(ctx context.C
 	hit := searchResult.Hits.Hits[0]
 	vout := new(VoutStream)
 	if err := json.Unmarshal(*hit.Source, vout); err != nil {
-		fmt.Println(err.Error())
+		log.Fatalln(err.Error())
 	}
 	return &(hit.Id), vout, nil
 }
@@ -379,7 +379,7 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 	hit := searchResult.Hits.Hits[0]
 	vout := new(VoutStream)
 	if err := json.Unmarshal(*hit.Source, vout); err != nil {
-		fmt.Println(err.Error())
+		log.Fatalln(err.Error())
 	}
 	return &(hit.Id), vout, nil
 }
@@ -402,7 +402,7 @@ func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx con
 	hit := searchResult.Hits.Hits[0]
 	err = json.Unmarshal(*hit.Source, balance)
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Fatalln(err.Error())
 	}
 	return &(hit.Id), balance, nil
 }
@@ -420,9 +420,8 @@ func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateTy
 	balanceToFloat, _ := balance.Float64()
 	_, err := client.Update().Index("balance").Type("balance").Id(id).Doc(map[string]interface{}{"amount": balanceToFloat}).DocAsUpsert(true).DetectNoop(true).Refresh("true").Do(ctx)
 	if err != nil {
-		fmt.Println("update btcbalance docutment:", id, err.Error())
+		log.Fatalln("update btcbalance docutment error:", id, err.Error())
 	}
-	fmt.Println(strings.Join([]string{"update btcbalance docutment ", id, " 's amount to ", strconv.FormatFloat(balanceToFloat, 'f', 6, 64)}, ""))
 	return nil
 }
 
@@ -430,7 +429,6 @@ func (client *elasticClientAlias) UpdateVoutUsedField(ctx context.Context, id st
 	// 更新 voutStream 的 used 字段，该字段数据类型为 object, txid 为 vin 所属 tx 的 txid, vinindex 为 vin 在所属 tx 中的 vins 序号
 	client.Update().Index("vout").Type("vout").Id(id).Doc(map[string]interface{}{"used": voutUsed{Txid: vinBelongTxid, VinIndex: vin.Vout}}).
 		DocAsUpsert(true).DetectNoop(true).Refresh("true").Do(ctx)
-	fmt.Println("Update vout", id, "used field as ", vinBelongTxid)
 }
 
 func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx context.Context, height int32) error {
@@ -564,7 +562,6 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 			for _, address := range addresses {
 				if balancdID, btcbalance, err := client.FindBalanceWithAddressOrInitWithAmount(ctx, address, vout.Value); err != nil {
 					client.Index().Index("balance").Type("balance").BodyJson(btcbalance).Refresh("true").Do(ctx)
-					fmt.Println(strings.Join([]string{err.Error(), " so we create new docutment"}, ""))
 				} else {
 					if err := client.UpdateBTCBlance(ctx, "add", *balancdID, btcbalance, vout.Value); err != nil {
 						log.Fatalf(err.Error())

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
@@ -26,12 +25,13 @@ func Sync() {
 		log.Fatalln(err.Error())
 	}
 	var DBCurrentHeight float64
-	if agg, err := eClient.MaxAgg("height", "block", "block"); err != nil {
+	agg, err := eClient.MaxAgg("height", "block", "block")
+	if err != nil {
+		log.Warnln(err.Error(), "resyncing")
 		btcClient.BTCReSetSync(info.Headers, eClient)
-	} else {
-		DBCurrentHeight = *agg
+		return
 	}
-
+	DBCurrentHeight = *agg
 	syncIndex := strconv.FormatFloat(DBCurrentHeight-5, 'f', -1, 64)
 	if SyncBeginRecord, err := eClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background()); err != nil || !SyncBeginRecord.Found {
 		btcClient.BTCReSetSync(info.Headers, eClient)
@@ -50,7 +50,7 @@ func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, from, end int3
 			// 这个地址交易数据比较明显， 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
 			// elasticClient.BTCRollBackAndSyncTx(from, height, block)
 			// elasticClient.BTCRollBackAndSyncBlock(from, height, block)
-			fmt.Println(block)
+			log.Infoln(block)
 		}
 	}
 }
@@ -81,14 +81,14 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 		DocParams := BTCBlockWithTxDetail(block)
 		client.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
-		fmt.Printf("sync update btc  %d %s\n", block.Height, block.Hash)
+		log.Warnln("Update block:", block.Height, block.Hash)
 	} else {
 		_, err := client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
 		if err != nil {
 			log.Fatalln("write doc error", err.Error())
 		}
 		client.Flush()
-		fmt.Printf("sync btc  %d %s\n", block.Height, block.Hash)
+		log.Infoln("Dump block", block.Height, block.Hash)
 	}
 	ch <- true
 }
