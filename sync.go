@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	"github.com/btcsuite/btcd/btcjson"
 )
@@ -88,7 +89,9 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 			log.Fatalln("write doc error", err.Error())
 		}
 		client.Flush()
-		log.Infoln("Dump block", block.Height, block.Hash)
+		sugar := zap.NewExample().Sugar()
+		defer sugar.Sync()
+		sugar.Info("Dump block", block.Height, " ", block.Hash)
 	}
 	ch <- true
 }

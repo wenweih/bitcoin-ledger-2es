@@ -48,3 +48,7 @@
 [[constraint]]
   branch = "master"
   name = "github.com/btcsuite/btcd"
+
+[[constraint]]
+  name = "go.uber.org/zap"
+  version = "1.8.0"
