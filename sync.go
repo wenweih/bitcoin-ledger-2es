@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 
 	log "github.com/sirupsen/logrus"
 
@@ -38,8 +37,7 @@ func Sync() {
 		btcClient.BTCReSetSync(info.Headers, eClient)
 	} else {
 		// 数据库倒退 5 个块再同步
-		ctx := context.Background()
-		btcClient.BTCSync(ctx, int32(DBCurrentHeight-5), info.Headers, eClient)
+		btcClient.SyncConcurrency(int32(DBCurrentHeight-5), info.Headers, eClient)
 	}
 }
 
@@ -50,28 +48,31 @@ func (btcClient *bitcoinClientAlias) BTCSync(ctx context.Context, from, end int3
 			log.Fatalf(err.Error())
 		} else {
 			// 这个地址交易数据比较明显， 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			elasticClient.BTCRollBackAndSyncTx(from, height, block)
+			// elasticClient.BTCRollBackAndSyncTx(from, height, block)
 			// elasticClient.BTCRollBackAndSyncBlock(from, height, block)
+			fmt.Println(block)
 		}
 	}
 }
 
 func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
-
-	var wg sync.WaitGroup
 	for height := from; height < end; height++ {
 		block, err := btcClient.getBlock(height)
 		if err != nil {
 			log.Fatalln(err.Error())
 		} else {
-			wg.Add(1)
-			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, &wg)
-			wg.Wait()
+			complete := make(chan bool)
+			totalTask := 2
+			go elasticClient.BTCRollBackAndSyncTx(from, height, block, complete)
+			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, complete)
+			for i := 0; i < totalTask; i++ {
+				<-complete
+			}
 		}
 	}
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, ch chan bool) {
 	ctx := context.Background()
 	bodyParams := BTCBlockWithTxDetail(block)
 	if height < (from + 5) {
@@ -89,5 +90,5 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 		client.Flush()
 		fmt.Printf("sync btc  %d %s\n", block.Height, block.Hash)
 	}
-	wg.Done()
+	ch <- true
 }

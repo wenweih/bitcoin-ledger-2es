@@ -44,7 +44,6 @@ func (btcClient *bitcoinClientAlias) BTCReSetSync(hightest int32, elasticClient 
 	}
 
 	elasticClient.createIndices()
-	// btcClient.BTCSync(ctx, int32(1), hightest, elasticClient)
 	btcClient.SyncConcurrency(int32(1), hightest, elasticClient)
 }
 

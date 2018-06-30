@@ -346,7 +346,7 @@ func (client *elasticClientAlias) FindVoutByVoutIndexAndBelongTxID(ctx context.C
 
 func (client *elasticClientAlias) FindBTCBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
 	blockHeightStr := strconv.FormatInt(int64(height), 10)
-	res, err := client.Get().Index("block").Type("block").Id(blockHeightStr).Do(ctx)
+	res, err := client.Get().Index("block").Type("block").Id(blockHeightStr).Refresh("true").Do(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +466,8 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 			// 根据 vout 所在的 txid 和 vout 的 N 字段, 从 voutstream 找出 vout
 			voutUsedID, DBVout, err := client.FindVoutByVoutIndexAndBelongTxID(ctx, tx.Txid, vout.N)
 			if err != nil {
-				fmt.Println("voutstream rollback fail", err.Error())
+				fmt.Println("voutstream rollback fail:", err.Error())
+				continue
 			}
 			// rollback voutStream : delete the vout
 			client.Delete().Index("vout").Type("vout").Id(*voutUsedID).Refresh("true").Do(ctx)
@@ -500,12 +501,14 @@ func (client *elasticClientAlias) UpdateBTCBlanceByVout(ctx context.Context, vou
 	return nil
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, ch chan bool) {
 	ctx := context.Background()
 	if height < (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
 	client.BTCSyncTx(ctx, from, height, block)
+	client.Flush()
+	ch <- true
 }
 
 func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
@@ -533,7 +536,10 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 				client.UpdateVoutUsedField(ctx, *voutUsedID, tx.Txid, vin)       // update voutstream's used field
 
 				// subtraction amount when vout as vin for a tx
-				client.UpdateBTCBlanceByVout(ctx, voutAsVin, "sub")
+				err := client.UpdateBTCBlanceByVout(ctx, voutAsVin, "sub")
+				if err != nil {
+					log.Fatalln("update balance error:", err.Error())
+				}
 			}
 		}
 
@@ -551,13 +557,13 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 				Value:   vout.Value,
 			})
 
-			voutParams := BTCVoutStream(vout, tx.Vin, tx.Txid)                     // voutStream params
-			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))          // vout amount
-			client.Index().Index("vout").Type("vout").BodyJson(voutParams).Do(ctx) // add voutstream item
+			voutParams := BTCVoutStream(vout, tx.Vin, tx.Txid)                                     // voutStream params
+			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))                          // vout amount
+			client.Index().Index("vout").Type("vout").BodyJson(voutParams).Refresh("true").Do(ctx) // add voutstream item
 
 			for _, address := range addresses {
 				if balancdID, btcbalance, err := client.FindBalanceWithAddressOrInitWithAmount(ctx, address, vout.Value); err != nil {
-					client.Index().Index("balance").Type("balance").BodyJson(btcbalance).Do(ctx)
+					client.Index().Index("balance").Type("balance").BodyJson(btcbalance).Refresh("true").Do(ctx)
 					fmt.Println(strings.Join([]string{err.Error(), " so we create new docutment"}, ""))
 				} else {
 					if err := client.UpdateBTCBlance(ctx, "add", *balancdID, btcbalance, vout.Value); err != nil {
@@ -573,6 +579,6 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 		}
 
 		txstreaParams := BTCTxStream(tx.Txid, block.Hash, fee.String(), tx.Time, txStreamVins, txStreamVouts)
-		client.Index().Index("tx").Type("tx").BodyJson(txstreaParams).Do(ctx) // add txstream item
+		client.Index().Index("tx").Type("tx").BodyJson(txstreaParams).Refresh("true").Do(ctx) // add txstream item
 	}
 }
