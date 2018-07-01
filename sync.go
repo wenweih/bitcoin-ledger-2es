@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"strconv"
+	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/zap"
@@ -43,23 +45,26 @@ func Sync() {
 }
 
 func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
+	var wg sync.WaitGroup
+	sugar := zap.NewExample().Sugar()
+	defer sugar.Sync()
 	for height := from; height < end; height++ {
+		dumpBlockTime := time.Now()
 		block, err := btcClient.getBlock(height)
 		if err != nil {
 			log.Fatalln(err.Error())
 		} else {
-			complete := make(chan bool)
-			totalTask := 2
-			go elasticClient.BTCRollBackAndSyncTx(from, height, block, complete)
-			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, complete)
-			for i := 0; i < totalTask; i++ {
-				<-complete
-			}
+			wg.Add(2)
+			go elasticClient.BTCRollBackAndSyncTx(from, height, block, &wg)
+			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, &wg)
 		}
+		wg.Wait()
+		sugar.Info("Dump block ", block.Height, " ", block.Hash, " dumpBlockTimeElapsed ", time.Since(dumpBlockTime))
 	}
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, ch chan bool) {
+func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+	defer wg.Done()
 	ctx := context.Background()
 	bodyParams := BTCBlockWithTxDetail(block)
 	if height < (from + 5) {
@@ -75,9 +80,5 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 			log.Fatalln("write doc error", err.Error())
 		}
 		client.Flush()
-		sugar := zap.NewExample().Sugar()
-		defer sugar.Sync()
-		sugar.Info("Dump block", block.Height, " ", block.Hash)
 	}
-	ch <- true
 }

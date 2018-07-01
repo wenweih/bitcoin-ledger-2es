@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/olivere/elastic"
@@ -385,9 +386,7 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 }
 
 func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *BTCBalance, error) {
-	q := elastic.NewBoolQuery()
-	q = q.Must(elastic.NewTermQuery("address", address))
-
+	q := elastic.NewTermQuery("address", address)
 	searchResult, err := client.Search().Index("balance").Type("balance").Query(q).Do(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -418,7 +417,7 @@ func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateTy
 		return errors.New("operateType params error, it's value is one of the 'add' or sub'")
 	}
 	balanceToFloat, _ := balance.Float64()
-	_, err := client.Update().Index("balance").Type("balance").Id(id).Doc(map[string]interface{}{"amount": balanceToFloat}).DocAsUpsert(true).DetectNoop(true).Refresh("true").Do(ctx)
+	_, err := client.Update().Index("balance").Type("balance").Id(id).Doc(map[string]interface{}{"amount": balanceToFloat}).DocAsUpsert(true).Refresh("true").Do(ctx)
 	if err != nil {
 		log.Fatalln("update btcbalance docutment error:", id, err.Error())
 	}
@@ -499,14 +498,14 @@ func (client *elasticClientAlias) UpdateBTCBlanceByVout(ctx context.Context, vou
 	return nil
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, ch chan bool) {
+func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+	defer wg.Done()
 	ctx := context.Background()
 	if height < (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
 	client.BTCSyncTx(ctx, from, height, block)
 	client.Flush()
-	ch <- true
 }
 
 func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
@@ -558,7 +557,6 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 			voutParams := BTCVoutStream(vout, tx.Vin, tx.Txid)                                     // voutStream params
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))                          // vout amount
 			client.Index().Index("vout").Type("vout").BodyJson(voutParams).Refresh("true").Do(ctx) // add voutstream item
-
 			for _, address := range addresses {
 				if balancdID, btcbalance, err := client.FindBalanceWithAddressOrInitWithAmount(ctx, address, vout.Value); err != nil {
 					client.Index().Index("balance").Type("balance").BodyJson(btcbalance).Refresh("true").Do(ctx)
