@@ -320,6 +320,28 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	return maxAggRes.Value, nil
 }
 
+func (client *elasticClientAlias) QueryVoutWithIDs(ctx context.Context, indexVins []IndexVin) ([]*VoutWithID, error) {
+	q := elastic.NewBoolQuery()
+	for _, vin := range indexVins {
+		qnestedBool := elastic.NewBoolQuery()
+		qnestedBool.Must(elastic.NewTermQuery("txidbelongto", vin.Txid), elastic.NewTermQuery("voutindex", vin.Index))
+		q.Should(qnestedBool)
+	}
+	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(indexVins)).Query(q).Do(ctx)
+	if err != nil {
+		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
+	}
+	var voutWithIDs []*VoutWithID
+	for _, vout := range searchResult.Hits.Hits {
+		newVout := new(VoutStream)
+		if err := json.Unmarshal(*vout.Source, newVout); err != nil {
+			log.Fatalln("query vouts error: unmarshal json ", err.Error())
+		}
+		voutWithIDs = append(voutWithIDs, &VoutWithID{vout.Id, newVout})
+	}
+	return voutWithIDs, nil
+}
+
 // FindVoutByVinIndexAndTxID 根据 vin 的 txid 和 vout 字段, 从 voutstream 找出 vout
 func (client *elasticClientAlias) FindVoutByVoutIndexAndBelongTxID(ctx context.Context, txidbelongto string, voutindex uint32) (*string, *VoutStream, error) {
 	// https://github.com/olivere/elastic/wiki/QueryDSL
@@ -506,6 +528,42 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 	}
 	client.BTCSyncTx(ctx, from, height, block)
 	client.Flush()
+}
+
+func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
+	for _, tx := range block.Tx {
+		var (
+			// voutAmount    decimal.Decimal
+			vinAmount decimal.Decimal
+			// fee           decimal.Decimal
+			txVinsField []*AddressWithValueInTx
+			// txStreamVouts []*AddressWithValueInTx
+			indexVins []IndexVin
+		)
+		vins := tx.Vin
+		for _, vin := range vins {
+			item := IndexVin{
+				Txid:  vin.Txid,
+				Index: vin.Vout,
+			}
+			indexVins = append(indexVins, item)
+		}
+		voutWithIDs, err := client.QueryVoutWithIDs(ctx, indexVins)
+		if err != nil {
+			log.Fatalln("sync tx error, vout not found", err.Error())
+		}
+
+		for _, voutWithID := range voutWithIDs {
+			// vin amount
+			vinAmount = vinAmount.Add(decimal.NewFromFloat(voutWithID.Vout.Value))
+			// tx type vins field
+			txVinsField = append(txVinsField, &AddressWithValueInTx{
+				Address: voutWithID.Vout.Addresses[0],
+				Value:   voutWithID.Vout.Value,
+			})
+		}
+	}
+	return errors.New("test error")
 }
 
 func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {

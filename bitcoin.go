@@ -104,10 +104,28 @@ type VoutStream struct {
 	Used         interface{} `json:"used"`
 }
 
+// VoutWithID type struct
+type VoutWithID struct {
+	ID   string
+	Vout *VoutStream
+}
+
 // AddressWithValueInTx 交易中地输入输出的地址和余额
 type AddressWithValueInTx struct {
 	Address string  `json:"address"`
 	Value   float64 `json:"value"`
+}
+
+// IndexVin Vin 索引
+type IndexVin struct {
+	Txid  string `json:"txid"` // vout 所在的 txid
+	Index uint32 `json:"voutindex"`
+}
+
+// IndexVout vout 索引
+type IndexVout struct {
+	Txid  string
+	Index uint32
 }
 
 // TxStream type struct
