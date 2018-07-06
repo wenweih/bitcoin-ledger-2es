@@ -289,6 +289,7 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 }
 
 func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
+	bulkRequest := client.Bulk()
 	for _, tx := range block.Tx {
 		var (
 			// voutAmount    decimal.Decimal
@@ -314,9 +315,6 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 		if len(voutWithIDs) <= 0 {
 			continue
 		}
-
-		bulkRequest := client.Bulk()
-
 		for _, voutWithID := range voutWithIDs {
 			// vin amount
 			vinAmount = vinAmount.Add(decimal.NewFromFloat(voutWithID.Vout.Value))
@@ -325,17 +323,16 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 				Address: voutWithID.Vout.Addresses[0],
 				Value:   voutWithID.Vout.Value,
 			})
-
 			update := elastic.NewBulkUpdateRequest().Index("vout").Type("vout").Id(voutWithID.ID).
 				Doc(map[string]interface{}{"used": voutUsed{Txid: tx.Txid, VinIndex: voutWithID.Vout.Voutindex}})
 			bulkRequest.Add(update)
 		}
-		bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
-		if err != nil {
-			log.Fatalln(err.Error())
-		}
-		bulkResp.Updated()
 	}
+	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	bulkResp.Updated()
 	return errors.New("test error")
 }
 
