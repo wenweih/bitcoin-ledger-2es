@@ -288,10 +288,18 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 
 // BulkQueryBalance query balances by address slice
 func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
-	var balancesWithIDs []*BalanceWithID
-	q := elastic.NewTermsQuery("address", addresses...)
-	log.Warnln("addresses length", len(addresses))
-	searchResult, err := client.Search().Index("balance").Type("balance").Size(len(addresses)).Query(q).Do(ctx)
+	var (
+		balancesWithIDs []*BalanceWithID
+		qAddresses      []interface{}
+	)
+
+	uniqueAddresses := removeDuplicatesForSlice(addresses...)
+	for _, address := range uniqueAddresses {
+		qAddresses = append(qAddresses, address)
+	}
+
+	q := elastic.NewTermsQuery("address", qAddresses...)
+	searchResult, err := client.Search().Index("balance").Type("balance").Size(len(qAddresses)).Query(q).Do(ctx)
 	if err != nil {
 		return nil, errors.New(strings.Join([]string{"Get balances error:", err.Error()}, " "))
 	}
@@ -309,7 +317,7 @@ func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresse
 // 统计块中的所有 vout 涉及到去重后的所有地址对应充值额度
 func calculateUniqueAddressWithSumForVinOrVout(addresses []interface{}, AddressWithAmountSlice []*Balance) []*AddressWithAmount {
 	var UniqueAddressesWithSum []*AddressWithAmount
-	UniqueAddresses := removeDuplicatesForSlice(addresses)
+	UniqueAddresses := removeDuplicatesForSlice(addresses...)
 	// 统计去重后涉及到的 vout 地址及其对应的增加余额
 	for _, uAddress := range UniqueAddresses {
 		sumDeposit := decimal.NewFromFloat(0)

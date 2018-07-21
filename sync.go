@@ -32,8 +32,9 @@ func Sync() {
 	}
 
 	// // 134680
-	// block, _ := btcClient.getBlock(int32(141545))
-	// if err := eClient.syncTx(context.Background(), int32(141545), block); err != nil {
+	// fmt.Println(info)
+	// block, _ := btcClient.getBlock(int32(143878))
+	// if err := eClient.syncTx(context.Background(), int32(143878), block); err != nil {
 	// 	return
 	// }
 	//
@@ -99,7 +100,6 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 
 func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
 	bulkRequest := client.Bulk()
-	// bulkRequestVin := client.Bulk()
 	var (
 		vinAddressWithAmountSlice         []*Balance
 		voutAddressWithAmountSlice        []*Balance
@@ -188,7 +188,7 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 
 	// 判断去重后的区块中所有交易的 vin 涉及到的地址数量是否与从 es 数据库中查询得到的 vinBalancesWithIDs 数量是否一直
 	// 不一致则说明 balance type 中存在某个地址重复数据，此时应重新同步数据 TODO
-	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses)
+	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses...)
 	if len(UniqueVinAddresses) != len(vinBalancesWithIDs) {
 		log.Fatalln("There are duplicate records in balances type")
 	}

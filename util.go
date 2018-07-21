@@ -40,10 +40,10 @@ func initLogger() {
 	}
 }
 
-func removeDuplicatesForSlice(slice []interface{}) []string {
+func removeDuplicatesForSlice(slice ...interface{}) []string {
 	encountered := map[string]bool{}
-	for v := range slice {
-		encountered[slice[v].(string)] = true
+	for _, v := range slice {
+		encountered[v.(string)] = true
 	}
 	result := []string{}
 	for key := range encountered {
