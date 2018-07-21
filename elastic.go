@@ -19,248 +19,6 @@ type elasticClientAlias struct {
 	*elastic.Client
 }
 
-const blockMapping = `
-{
-  "settings": {
-    "number_of_shards": 1,
-    "number_of_replicas": 0
-  },
-  "mappings": {
-    "block": {
-      "properties": {
-        "hash": {
-          "type": "keyword"
-        },
-        "strippedsize": {
-          "type": "integer"
-        },
-        "size": {
-          "type": "integer"
-        },
-        "weight": {
-          "type": "integer"
-        },
-        "height": {
-          "type": "integer"
-        },
-        "versionHex": {
-          "type": "text"
-        },
-        "merkleroot": {
-          "type": "text"
-        },
-        "tx": {
-          "properties": {
-            "hex": {
-              "type": "text"
-            },
-            "txid": {
-              "type": "text"
-            },
-            "hash": {
-              "type": "text"
-            },
-            "version": {
-              "type": "short"
-            },
-            "size": {
-              "type": "integer"
-            },
-            "vsize": {
-              "type": "integer"
-            },
-            "locktime": {
-              "type": "long"
-            },
-            "vin": {
-              "properties": {
-                "txid": {
-                  "type": "text"
-                },
-                "vout": {
-                  "type": "short"
-                },
-                "scriptSig": {
-                  "properties": {
-                    "asm": {
-                      "type": "text"
-                    },
-                    "hex": {
-                      "type": "text"
-                    }
-                  }
-                },
-                "sequence": {
-                  "type": "long"
-                },
-                "txinwitness": {
-                  "type":"keyword"
-                }
-              }
-            },
-            "vout": {
-              "properties": {
-                "value": {
-                  "type": "double"
-                },
-                "n": {
-                  "type": "short"
-                },
-                "scriptPubKey": {
-                  "properties": {
-                    "asm": {
-                      "type": "text"
-                    },
-                    "hex": {
-                      "type": "text"
-                    },
-                    "reqSigs": {
-                      "type": "short"
-                    },
-                    "type": {
-                      "type": "text"
-                    },
-                    "addresses": {
-                      "type":"keyword"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "time": {
-          "type": "long"
-        },
-        "mediantime": {
-          "type": "long"
-        },
-        "nonce": {
-          "type": "long"
-        },
-        "bits": {
-          "type": "text"
-        },
-        "difficulty": {
-          "type": "double"
-        },
-        "chainwork": {
-          "type": "text"
-        },
-        "previoushash": {
-          "type": "text"
-        },
-        "nexthash": {
-          "type": "text"
-        }
-      }
-    }
-  }
-}`
-
-const txMapping = `
-{
-  "settings": {
-    "number_of_shards": 1,
-    "number_of_replicas": 0
-  },
-  "mappings": {
-		"tx": {
-      "properties": {
-        "txid": {
-          "type": "text"
-        },
-        "fee": {
-          "type": "double"
-        },
-				"blockhash": {
-					"type": "text"
-				},
-        "vins": {
-          "type": "nested",
-          "properties": {
-            "address": {
-              "type": "text"
-            },
-            "value": {
-              "type": "double"
-            }
-          }
-        },
-        "vouts": {
-          "type": "nested",
-          "properties": {
-            "address": {
-              "type": "text"
-            },
-            "value": {
-              "type": "double"
-            }
-          }
-        },
-        "time": {
-          "type": "long"
-        }
-      }
-    }
-  }
-}`
-
-const voutMapping = `
-{
-  "settings": {
-    "number_of_shards": 1,
-    "number_of_replicas": 0
-  },
-  "mappings": {
-		"vout": {
-      "properties": {
-        "txidbelongto": {
-          "type": "text"
-        },
-        "value": {
-          "type": "double"
-        },
-        "voutindex": {
-          "type": "short"
-        },
-        "coinbase": {
-          "type": "boolean"
-        },
-        "addresses": {
-          "type":"keyword"
-        },
-				"time": {
-					"type": "long"
-				},
-        "used": {
-          "type":"object"
-        }
-      }
-    }
-  }
-}`
-
-const balanceMapping = `
-{
-  "settings": {
-    "number_of_shards": 1,
-    "number_of_replicas": 0
-  },
-  "mappings": {
-		"balance": {
-			"properties": {
-				"address": {
-					"type":"keyword"
-				},
-				"amount": {
-					"type": "double"
-				}
-			}
-		}
-  }
-}`
-
 func (conf configure) elasticClient() (*elasticClientAlias, error) {
 	client, err := elastic.NewClient(elastic.SetURL(conf.ElasticURL),
 		elastic.SetSniff(conf.ElasticSniff))
@@ -301,9 +59,6 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	aggKey := strings.Join([]string{"max", field}, "_")
 	// Get Query params https://github.com/olivere/elastic/blob/release-branch.v6/search_aggs_metrics_max_test.go
 	// https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-aggregations-metrics-max-aggregation.html
-	// src, _ := hightestAgg.Source()
-	// data, _ := json.Marshal(src)
-	// fmt.Printf(string(data))
 	searchResult, err := client.Search().
 		Index(index).Type(typeName).
 		Query(elastic.NewMatchAllQuery()).
@@ -318,6 +73,28 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 		return nil, errors.New(strings.Join([]string{"max", field, "in", index, typeName, "not found"}, " "))
 	}
 	return maxAggRes.Value, nil
+}
+
+func (client *elasticClientAlias) QueryVoutWithVin(ctx context.Context, indexVins []IndexVin) ([]*VoutWithID, error) {
+	q := elastic.NewBoolQuery()
+	for _, vin := range indexVins {
+		qnestedBool := elastic.NewBoolQuery()
+		qnestedBool.Must(elastic.NewTermQuery("txidbelongto", vin.Txid), elastic.NewTermQuery("voutindex", vin.Index))
+		q.Should(qnestedBool)
+	}
+	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(indexVins)).Query(q).Do(ctx)
+	if err != nil {
+		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
+	}
+	var voutWithIDs []*VoutWithID
+	for _, vout := range searchResult.Hits.Hits {
+		newVout := new(VoutStream)
+		if err := json.Unmarshal(*vout.Source, newVout); err != nil {
+			log.Fatalln("query vouts error: unmarshal json ", err.Error())
+		}
+		voutWithIDs = append(voutWithIDs, &VoutWithID{vout.Id, newVout})
+	}
+	return voutWithIDs, nil
 }
 
 // FindVoutByVinIndexAndTxID 根据 vin 的 txid 和 vout 字段, 从 voutstream 找出 vout
@@ -385,14 +162,14 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 	return &(hit.Id), vout, nil
 }
 
-func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *BTCBalance, error) {
+func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *Balance, error) {
 	q := elastic.NewTermQuery("address", address)
 	searchResult, err := client.Search().Index("balance").Type("balance").Query(q).Do(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var balance = new(BTCBalance)
+	var balance = new(Balance)
 	if len(searchResult.Hits.Hits) < 1 {
 		balance.Address = address
 		balance.Amount = amount
@@ -406,7 +183,7 @@ func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx con
 	return &(hit.Id), balance, nil
 }
 
-func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateType, id string, btcbalance *BTCBalance, amount float64) error {
+func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateType, id string, btcbalance *Balance, amount float64) error {
 	balance := decimal.NewFromFloat(btcbalance.Amount)
 	switch operateType {
 	case "add":
@@ -504,11 +281,49 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 	if height < (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
-	client.BTCSyncTx(ctx, from, height, block)
+	// client.BTCSyncTx(ctx, from, block)
+	client.syncTx(ctx, from, block)
 	client.Flush()
 }
 
-func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
+// BulkQueryBalance query balances by address slice
+func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
+	var balancesWithIDs []*BalanceWithID
+	q := elastic.NewTermsQuery("address", addresses...)
+	log.Warnln("addresses length", len(addresses))
+	searchResult, err := client.Search().Index("balance").Type("balance").Size(len(addresses)).Query(q).Do(ctx)
+	if err != nil {
+		return nil, errors.New(strings.Join([]string{"Get balances error:", err.Error()}, " "))
+	}
+
+	for _, balance := range searchResult.Hits.Hits {
+		b := new(Balance)
+		if err := json.Unmarshal(*balance.Source, b); err != nil {
+			return nil, errors.New(strings.Join([]string{"unmarshal error:", err.Error()}, " "))
+		}
+		balancesWithIDs = append(balancesWithIDs, &BalanceWithID{balance.Id, *b})
+	}
+	return balancesWithIDs, nil
+}
+
+// 统计块中的所有 vout 涉及到去重后的所有地址对应充值额度
+func calculateUniqueAddressWithSumForVinOrVout(addresses []interface{}, AddressWithAmountSlice []*Balance) []*AddressWithAmount {
+	var UniqueAddressesWithSum []*AddressWithAmount
+	UniqueAddresses := removeDuplicatesForSlice(addresses)
+	// 统计去重后涉及到的 vout 地址及其对应的增加余额
+	for _, uAddress := range UniqueAddresses {
+		sumDeposit := decimal.NewFromFloat(0)
+		for _, addressWithAmount := range AddressWithAmountSlice {
+			if uAddress == addressWithAmount.Address {
+				sumDeposit = sumDeposit.Add(decimal.NewFromFloat(addressWithAmount.Amount))
+			}
+		}
+		UniqueAddressesWithSum = append(UniqueAddressesWithSum, &AddressWithAmount{uAddress, sumDeposit})
+	}
+	return UniqueAddressesWithSum
+}
+
+func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) {
 	for _, tx := range block.Tx {
 		var (
 			voutAmount    decimal.Decimal
@@ -541,7 +356,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 		}
 
 		for _, vout := range tx.Vout {
-			addTmp, err := BTCVoutAddress(vout)
+			addTmp, err := voutAddressFun(vout)
 			if err != nil {
 				fmt.Println(err.Error())
 				continue
@@ -554,7 +369,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 				Value:   vout.Value,
 			})
 
-			voutParams := BTCVoutStream(vout, tx.Vin, tx.Txid)                                     // voutStream params
+			voutParams, _ := newVoutFun(vout, tx.Vin, tx.Txid)                                     // voutStream params
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))                          // vout amount
 			client.Index().Index("vout").Type("vout").BodyJson(voutParams).Refresh("true").Do(ctx) // add voutstream item
 			for _, address := range addresses {
@@ -573,7 +388,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 			fee = decimal.NewFromFloat(0)
 		}
 
-		txstreaParams := BTCTxStream(tx.Txid, block.Hash, fee.String(), tx.Time, txStreamVins, txStreamVouts)
+		txstreaParams := esTxFun(tx.Txid, block.Hash, fee.String(), tx.Time, txStreamVins, txStreamVouts)
 		client.Index().Index("tx").Type("tx").BodyJson(txstreaParams).Refresh("true").Do(ctx) // add txstream item
 	}
 }

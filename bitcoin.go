@@ -9,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -88,10 +89,28 @@ func (btcClient *bitcoinClientAlias) getBlock(height int32) (*btcjson.GetBlockVe
 	return block, nil
 }
 
-// BTCBalance type struct
-type BTCBalance struct {
+// Balance type struct
+type Balance struct {
 	Address string  `json:"address"`
 	Amount  float64 `json:"amount"`
+}
+
+// AddressWithAmount 地址-余额类型
+type AddressWithAmount struct {
+	Address string          `json:"address"`
+	Amount  decimal.Decimal `json:"amount"`
+}
+
+// BalanceWithID 类型
+type BalanceWithID struct {
+	ID      string  `json:"id"`
+	Balance Balance `json:"balance"`
+}
+
+// VoutWithID type struct
+type VoutWithID struct {
+	ID   string
+	Vout *VoutStream
 }
 
 // VoutStream type struct
@@ -110,6 +129,18 @@ type AddressWithValueInTx struct {
 	Value   float64 `json:"value"`
 }
 
+// IndexVin Vin 索引
+type IndexVin struct {
+	Txid  string `json:"txid"` // vout 所在的 txid
+	Index uint32 `json:"voutindex"`
+}
+
+// IndexVout vout 索引
+type IndexVout struct {
+	Txid  string
+	Index uint32
+}
+
 // TxStream type struct
 type TxStream struct {
 	Txid      string                  `json:"txid"`
@@ -121,8 +152,8 @@ type TxStream struct {
 }
 
 type voutUsed struct {
-	Txid     string `json:"txid"`
-	VinIndex uint32 `json:"vinindex"`
+	Txid     string `json:"txid"`     // 所在交易的 id
+	VinIndex uint32 `json:"vinindex"` // 作为 vin 被使用时，vin 的 vout 字段
 }
 
 // BTCBlockWithTxDetail elasticsearch 中 block Type 数据
@@ -146,8 +177,8 @@ func BTCBlockWithTxDetail(block *btcjson.GetBlockVerboseResult) interface{} {
 	return blockWithTx
 }
 
-// BTCVoutAddress found address in bitcoin vout
-func BTCVoutAddress(vout btcjson.Vout) (*[]string, error) {
+// get addresses in bitcoin vout
+func voutAddressFun(vout btcjson.Vout) (*[]string, error) {
 	var addresses []string
 	if len(vout.ScriptPubKey.Addresses) > 0 {
 		addresses = vout.ScriptPubKey.Addresses
@@ -159,14 +190,17 @@ func BTCVoutAddress(vout btcjson.Vout) (*[]string, error) {
 	return nil, errors.New("address not fount in vout")
 }
 
-// BTCVoutStream elasticsearch 中 voutstream Type 数据
-func BTCVoutStream(vout btcjson.Vout, vins []btcjson.Vin, TxID string) *VoutStream {
+// VoutStream elasticsearch 中 voutstream Type 数据
+func newVoutFun(vout btcjson.Vout, vins []btcjson.Vin, TxID string) (*VoutStream, error) {
 	coinbase := false
 	if len(vins[0].Coinbase) != 0 && len(vins[0].Txid) == 0 {
 		coinbase = true
 	}
 
-	addresses, _ := BTCVoutAddress(vout)
+	addresses, err := voutAddressFun(vout)
+	if err != nil {
+		return nil, err
+	}
 
 	v := &VoutStream{
 		TxIDBelongTo: TxID,
@@ -176,11 +210,11 @@ func BTCVoutStream(vout btcjson.Vout, vins []btcjson.Vin, TxID string) *VoutStre
 		Addresses:    *addresses,
 		Used:         nil,
 	}
-	return v
+	return v, nil
 }
 
-// BTCTxStream elasticsearch 中 txstream Type 数据
-func BTCTxStream(txid, blockHash, fee string, time int64, simpleVins, simpleVouts []*AddressWithValueInTx) *TxStream {
+//  elasticsearch 中 txstream Type 数据
+func esTxFun(txid, blockHash, fee string, time int64, simpleVins, simpleVouts []*AddressWithValueInTx) *TxStream {
 	result := &TxStream{
 		Txid:      txid,
 		Fee:       fee,
@@ -190,4 +224,58 @@ func BTCTxStream(txid, blockHash, fee string, time int64, simpleVins, simpleVout
 		Vouts:     simpleVouts,
 	}
 	return result
+}
+
+// return value:
+// *[]*AddressWithValueInTx for elasticsearch tx Type vouts field
+// *[]interface{} all addresses related to the vout
+// *[]*Balance all addresses related to the vout with value amount
+func parseTxVout(vout btcjson.Vout) ([]*AddressWithValueInTx, []interface{}, []*Balance) {
+	var (
+		txVoutsField           []*AddressWithValueInTx
+		voutAddresses          []interface{} // All addresses related with vout in a block
+		voutAddressWithAmounts []*Balance
+	)
+	// vouts field in tx type
+	for _, address := range vout.ScriptPubKey.Addresses {
+		txVoutsField = append(txVoutsField, &AddressWithValueInTx{
+			Address: address,
+			Value:   vout.Value,
+		})
+
+		// vout addresses slice
+		voutAddresses = append(voutAddresses, address)
+
+		// vout addresses with amount
+		voutAddressWithAmounts = append(voutAddressWithAmounts, &Balance{address, vout.Value})
+	}
+	return txVoutsField, voutAddresses, voutAddressWithAmounts
+}
+
+// return value
+// []*AddressWithValueInTx for elasticsearch tx Type vins field
+// []interface{} all addresses related to the vin
+// []*Balance all addresses related to the vout with value amount
+func parseESVout(voutWithID *VoutWithID) ([]*AddressWithValueInTx, []interface{}, []*Balance) {
+	var (
+		txTypeVinsField           []*AddressWithValueInTx
+		vinAddresses              []interface{}
+		vinAddressWithAmountSlice []*Balance
+	)
+
+	for _, address := range voutWithID.Vout.Addresses {
+		vinAddresses = append(vinAddresses, address)
+		vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, &Balance{address, voutWithID.Vout.Value})
+		txTypeVinsField = append(txTypeVinsField, &AddressWithValueInTx{address, voutWithID.Vout.Value})
+	}
+	return txTypeVinsField, vinAddresses, vinAddressWithAmountSlice
+}
+
+func indexedVinsFun(vins []btcjson.Vin) []IndexVin {
+	var indexVins []IndexVin
+	for _, vin := range vins {
+		item := IndexVin{vin.Txid, vin.Vout}
+		indexVins = append(indexVins, item)
+	}
+	return indexVins
 }
