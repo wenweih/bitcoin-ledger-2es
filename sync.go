@@ -122,12 +122,11 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 		)
 
 		for _, vout := range tx.Vout {
+			//  bulk insert vouts
 			newVout, err := newVoutFun(vout, tx.Vin, tx.Txid)
 			if err != nil {
 				continue
 			}
-
-			//  bulk insert vout
 			createdVout := elastic.NewBulkIndexRequest().Index("vout").Type("vout").Doc(newVout)
 			bulkRequest.Add(createdVout)
 			elastic.NewSliceQuery()
@@ -142,8 +141,8 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
 		}
 
+		// get es vouts with id in elasticsearch by tx vins
 		indexVins = indexedVinsFun(tx.Vin)
-		// get vouts with id in elasticsearch by vin
 		voutWithIDs, err := client.QueryVoutWithVin(ctx, indexVins)
 		if err != nil {
 			log.Fatalln("sync tx error, vout not found", err.Error())
@@ -208,6 +207,8 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 			}
 		}
 	}
+	// vin 涉及到的地址余额必须在 vout 涉及到的地址余额之前更新，原因如下：
+	// 但一笔交易中的 vins 里面的地址同时出现在 vout 中（就是常见的找零），那么对于这个地址而言，必须先减去 vin 的余额，再加上 vout 的余额
 	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
 		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
 		if e != nil {
@@ -241,13 +242,14 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 			}
 		}
 
+		// if voutAddressWithSumDeposit not exist in balance ES Type, insert a docutment
 		if isNewBalance {
 			amount, _ := voutAddressWithSumDeposit.Amount.Float64()
 			newBalance := &Balance{
 				Address: voutAddressWithSumDeposit.Address,
 				Amount:  amount,
 			}
-			//  bulk insert vout
+			//  bulk insert balance
 			insertBalance := elastic.NewBulkIndexRequest().Index("balance").Type("balance").Doc(newBalance)
 			bulkRequest.Add(insertBalance).Refresh("true")
 		}
