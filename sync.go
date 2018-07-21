@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/olivere/elastic"
+	"github.com/shopspring/decimal"
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 
@@ -27,10 +30,19 @@ func Sync() {
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
+
+	// // 134680
+	// block, _ := btcClient.getBlock(int32(141545))
+	// if err := eClient.syncTx(context.Background(), int32(141545), block); err != nil {
+	// 	return
+	// }
+	//
+	// btcClient.SyncConcurrency(int32(134679), info.Headers, eClient)
+
 	var DBCurrentHeight float64
 	agg, err := eClient.MaxAgg("height", "block", "block")
 	if err != nil {
-		log.Warnln(err.Error(), "resyncing")
+		log.Warnln(err.Error(), ",resync from genesis block")
 		btcClient.BTCReSetSync(info.Headers, eClient)
 		return
 	}
@@ -83,4 +95,172 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 		}
 		client.Flush()
 	}
+}
+
+func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
+	bulkRequest := client.Bulk()
+	// bulkRequestVin := client.Bulk()
+	var (
+		vinAddressWithAmountSlice         []*Balance
+		voutAddressWithAmountSlice        []*Balance
+		vinAddresses                      []interface{} // All addresses related with vin in a block
+		voutAddresses                     []interface{} // All addresses related with vout in a block
+		vinBalancesWithIDs                []*BalanceWithID
+		voutBalancesWithIDs               []*BalanceWithID
+		UniqueVoutAddressesWithSumDeposit []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
+		UniqueVinAddressesWithSumWithdraw []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
+	)
+
+	for _, tx := range block.Tx {
+		var (
+			voutAmount       decimal.Decimal
+			vinAmount        decimal.Decimal
+			fee              decimal.Decimal
+			txTypeVinsField  []*AddressWithValueInTx
+			txTypeVoutsField []*AddressWithValueInTx
+			indexVins        []IndexVin
+		)
+
+		for _, vout := range tx.Vout {
+			newVout, err := newVoutFun(vout, tx.Vin, tx.Txid)
+			if err != nil {
+				continue
+			}
+
+			//  bulk insert vout
+			createdVout := elastic.NewBulkIndexRequest().Index("vout").Type("vout").Doc(newVout)
+			bulkRequest.Add(createdVout)
+			elastic.NewSliceQuery()
+
+			// vout amount
+			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))
+
+			// vouts field in tx type
+			txTypeVoutsFieldTmp, voutAddressesTmp, voutAddressWithAmountSliceTmp := parseTxVout(vout)
+			txTypeVoutsField = append(txTypeVoutsField, txTypeVoutsFieldTmp...)
+			voutAddresses = append(voutAddresses, voutAddressesTmp...)
+			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
+		}
+
+		indexVins = indexedVinsFun(tx.Vin)
+		// get vouts with id in elasticsearch by vin
+		voutWithIDs, err := client.QueryVoutWithVin(ctx, indexVins)
+		if err != nil {
+			log.Fatalln("sync tx error, vout not found", err.Error())
+		}
+		if len(voutWithIDs) <= 0 {
+			continue
+		}
+
+		for _, voutWithID := range voutWithIDs {
+			// vin amount
+			vinAmount = vinAmount.Add(decimal.NewFromFloat(voutWithID.Vout.Value))
+			// update vout type used field
+			updateVoutUsedField := elastic.NewBulkUpdateRequest().Index("vout").Type("vout").Id(voutWithID.ID).
+				Doc(map[string]interface{}{"used": voutUsed{Txid: tx.Txid, VinIndex: voutWithID.Vout.Voutindex}})
+			bulkRequest.Add(updateVoutUsedField).Refresh("true")
+
+			txTypeVinsFieldTmp, vinAddressesTmp, vinAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			txTypeVinsField = append(txTypeVinsField, txTypeVinsFieldTmp...)
+			vinAddresses = append(vinAddresses, vinAddressesTmp...)
+			vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, vinAddressWithAmountSliceTmp...)
+		}
+
+		// caculate tx fee
+		fee = vinAmount.Sub(voutAmount)
+		if len(tx.Vin) == 1 && len(tx.Vin[0].Coinbase) != 0 && len(tx.Vin[0].Txid) == 0 || vinAmount.Equal(voutAmount) {
+			fee = decimal.NewFromFloat(0)
+		}
+
+		// bulk insert tx docutment
+		txBulk := esTxFun(tx.Txid, block.Hash, fee.String(), tx.Time, txTypeVinsField, txTypeVoutsField)
+		createdTx := elastic.NewBulkIndexRequest().Index("tx").Type("tx").Doc(txBulk)
+		bulkRequest.Add(createdTx)
+	}
+
+	// 统计块中所有交易 vin 涉及到的地址及其对应的余额 (balance type)
+	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
+	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	vinBalancesWithIDs = bulkQueryVinBalance
+
+	// 判断去重后的区块中所有交易的 vin 涉及到的地址数量是否与从 es 数据库中查询得到的 vinBalancesWithIDs 数量是否一直
+	// 不一致则说明 balance type 中存在某个地址重复数据，此时应重新同步数据 TODO
+	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses)
+	if len(UniqueVinAddresses) != len(vinBalancesWithIDs) {
+		log.Fatalln("There are duplicate records in balances type")
+	}
+
+	bulkUpdateVinBalanceRequest := client.Bulk()
+	// update(sub)  balances related to vins addresses
+	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
+	for _, vinAddressWithSumWithdraw := range UniqueVinAddressesWithSumWithdraw {
+		for _, vinBalanceWithID := range vinBalancesWithIDs {
+			if vinAddressWithSumWithdraw.Address == vinBalanceWithID.Balance.Address {
+				balance := decimal.NewFromFloat(vinBalanceWithID.Balance.Amount).Sub(vinAddressWithSumWithdraw.Amount)
+				amount, _ := balance.Float64()
+				updateVinBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(vinBalanceWithID.ID).
+					Doc(map[string]interface{}{"amount": amount})
+				bulkUpdateVinBalanceRequest.Add(updateVinBalcne).Refresh("true")
+				break
+			}
+		}
+	}
+	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
+		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
+		if e != nil {
+			log.Fatalln(err.Error())
+		}
+		bulkUpdateVinBalanceResp.Updated()
+	}
+
+	// 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
+	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
+	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	voutBalancesWithIDs = bulkQueryVoutBalance
+	// update(add) or insert balances related to vouts addresses
+	// len(voutAddressWithSumDeposit) >= len(voutBalanceWithID)
+	for _, voutAddressWithSumDeposit := range UniqueVoutAddressesWithSumDeposit {
+		var isNewBalance bool
+		isNewBalance = true
+		for _, voutBalanceWithID := range voutBalancesWithIDs {
+			// update balance
+			if voutAddressWithSumDeposit.Address == voutBalanceWithID.Balance.Address {
+				balance := voutAddressWithSumDeposit.Amount.Add(decimal.NewFromFloat(voutBalanceWithID.Balance.Amount))
+				amount, _ := balance.Float64()
+				updateVoutBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(voutBalanceWithID.ID).
+					Doc(map[string]interface{}{"amount": amount})
+				bulkRequest.Add(updateVoutBalcne).Refresh("true")
+				isNewBalance = false
+				break
+			}
+		}
+
+		if isNewBalance {
+			amount, _ := voutAddressWithSumDeposit.Amount.Float64()
+			newBalance := &Balance{
+				Address: voutAddressWithSumDeposit.Address,
+				Amount:  amount,
+			}
+			//  bulk insert vout
+			insertBalance := elastic.NewBulkIndexRequest().Index("balance").Type("balance").Doc(newBalance)
+			bulkRequest.Add(insertBalance).Refresh("true")
+		}
+	}
+
+	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	bulkResp.Created()
+	bulkResp.Updated()
+	bulkResp.Indexed()
+
+	return errors.New("test error")
 }

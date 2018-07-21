@@ -39,3 +39,15 @@ func initLogger() {
 		log.Error(err.Error())
 	}
 }
+
+func removeDuplicatesForSlice(slice []interface{}) []string {
+	encountered := map[string]bool{}
+	for v := range slice {
+		encountered[slice[v].(string)] = true
+	}
+	result := []string{}
+	for key := range encountered {
+		result = append(result, key)
+	}
+	return result
+}

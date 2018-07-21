@@ -59,9 +59,6 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	aggKey := strings.Join([]string{"max", field}, "_")
 	// Get Query params https://github.com/olivere/elastic/blob/release-branch.v6/search_aggs_metrics_max_test.go
 	// https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-aggregations-metrics-max-aggregation.html
-	// src, _ := hightestAgg.Source()
-	// data, _ := json.Marshal(src)
-	// fmt.Printf(string(data))
 	searchResult, err := client.Search().
 		Index(index).Type(typeName).
 		Query(elastic.NewMatchAllQuery()).
@@ -78,7 +75,7 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	return maxAggRes.Value, nil
 }
 
-func (client *elasticClientAlias) QueryVoutWithIDs(ctx context.Context, indexVins []IndexVin) ([]*VoutWithID, error) {
+func (client *elasticClientAlias) QueryVoutWithVin(ctx context.Context, indexVins []IndexVin) ([]*VoutWithID, error) {
 	q := elastic.NewBoolQuery()
 	for _, vin := range indexVins {
 		qnestedBool := elastic.NewBoolQuery()
@@ -165,14 +162,14 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 	return &(hit.Id), vout, nil
 }
 
-func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *BTCBalance, error) {
+func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *Balance, error) {
 	q := elastic.NewTermQuery("address", address)
 	searchResult, err := client.Search().Index("balance").Type("balance").Query(q).Do(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var balance = new(BTCBalance)
+	var balance = new(Balance)
 	if len(searchResult.Hits.Hits) < 1 {
 		balance.Address = address
 		balance.Amount = amount
@@ -186,7 +183,7 @@ func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx con
 	return &(hit.Id), balance, nil
 }
 
-func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateType, id string, btcbalance *BTCBalance, amount float64) error {
+func (client *elasticClientAlias) UpdateBTCBlance(ctx context.Context, operateType, id string, btcbalance *Balance, amount float64) error {
 	balance := decimal.NewFromFloat(btcbalance.Amount)
 	switch operateType {
 	case "add":
@@ -284,59 +281,49 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 	if height < (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
-	client.BTCSyncTx(ctx, from, height, block)
+	// client.BTCSyncTx(ctx, from, block)
+	client.syncTx(ctx, from, block)
 	client.Flush()
 }
 
-func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
-	bulkRequest := client.Bulk()
-	for _, tx := range block.Tx {
-		var (
-			// voutAmount    decimal.Decimal
-			vinAmount decimal.Decimal
-			// fee           decimal.Decimal
-			txVinsField []*AddressWithValueInTx
-			// txStreamVouts []*AddressWithValueInTx
-			indexVins []IndexVin
-		)
-		vins := tx.Vin
-		for _, vin := range vins {
-			item := IndexVin{
-				Txid:  vin.Txid,
-				Index: vin.Vout,
-			}
-			indexVins = append(indexVins, item)
-		}
-		voutWithIDs, err := client.QueryVoutWithIDs(ctx, indexVins)
-		if err != nil {
-			log.Fatalln("sync tx error, vout not found", err.Error())
-		}
-
-		if len(voutWithIDs) <= 0 {
-			continue
-		}
-		for _, voutWithID := range voutWithIDs {
-			// vin amount
-			vinAmount = vinAmount.Add(decimal.NewFromFloat(voutWithID.Vout.Value))
-			// tx type vins field
-			txVinsField = append(txVinsField, &AddressWithValueInTx{
-				Address: voutWithID.Vout.Addresses[0],
-				Value:   voutWithID.Vout.Value,
-			})
-			update := elastic.NewBulkUpdateRequest().Index("vout").Type("vout").Id(voutWithID.ID).
-				Doc(map[string]interface{}{"used": voutUsed{Txid: tx.Txid, VinIndex: voutWithID.Vout.Voutindex}})
-			bulkRequest.Add(update)
-		}
-	}
-	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
+// BulkQueryBalance query balances by address slice
+func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
+	var balancesWithIDs []*BalanceWithID
+	q := elastic.NewTermsQuery("address", addresses...)
+	log.Warnln("addresses length", len(addresses))
+	searchResult, err := client.Search().Index("balance").Type("balance").Size(len(addresses)).Query(q).Do(ctx)
 	if err != nil {
-		log.Fatalln(err.Error())
+		return nil, errors.New(strings.Join([]string{"Get balances error:", err.Error()}, " "))
 	}
-	bulkResp.Updated()
-	return errors.New("test error")
+
+	for _, balance := range searchResult.Hits.Hits {
+		b := new(Balance)
+		if err := json.Unmarshal(*balance.Source, b); err != nil {
+			return nil, errors.New(strings.Join([]string{"unmarshal error:", err.Error()}, " "))
+		}
+		balancesWithIDs = append(balancesWithIDs, &BalanceWithID{balance.Id, *b})
+	}
+	return balancesWithIDs, nil
 }
 
-func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height int32, block *btcjson.GetBlockVerboseResult) {
+// 统计块中的所有 vout 涉及到去重后的所有地址对应充值额度
+func calculateUniqueAddressWithSumForVinOrVout(addresses []interface{}, AddressWithAmountSlice []*Balance) []*AddressWithAmount {
+	var UniqueAddressesWithSum []*AddressWithAmount
+	UniqueAddresses := removeDuplicatesForSlice(addresses)
+	// 统计去重后涉及到的 vout 地址及其对应的增加余额
+	for _, uAddress := range UniqueAddresses {
+		sumDeposit := decimal.NewFromFloat(0)
+		for _, addressWithAmount := range AddressWithAmountSlice {
+			if uAddress == addressWithAmount.Address {
+				sumDeposit = sumDeposit.Add(decimal.NewFromFloat(addressWithAmount.Amount))
+			}
+		}
+		UniqueAddressesWithSum = append(UniqueAddressesWithSum, &AddressWithAmount{uAddress, sumDeposit})
+	}
+	return UniqueAddressesWithSum
+}
+
+func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) {
 	for _, tx := range block.Tx {
 		var (
 			voutAmount    decimal.Decimal
@@ -369,7 +356,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 		}
 
 		for _, vout := range tx.Vout {
-			addTmp, err := BTCVoutAddress(vout)
+			addTmp, err := voutAddressFun(vout)
 			if err != nil {
 				fmt.Println(err.Error())
 				continue
@@ -382,7 +369,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 				Value:   vout.Value,
 			})
 
-			voutParams := BTCVoutStream(vout, tx.Vin, tx.Txid)                                     // voutStream params
+			voutParams, _ := newVoutFun(vout, tx.Vin, tx.Txid)                                     // voutStream params
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))                          // vout amount
 			client.Index().Index("vout").Type("vout").BodyJson(voutParams).Refresh("true").Do(ctx) // add voutstream item
 			for _, address := range addresses {
@@ -401,7 +388,7 @@ func (client *elasticClientAlias) BTCSyncTx(ctx context.Context, from, height in
 			fee = decimal.NewFromFloat(0)
 		}
 
-		txstreaParams := BTCTxStream(tx.Txid, block.Hash, fee.String(), tx.Time, txStreamVins, txStreamVouts)
+		txstreaParams := esTxFun(tx.Txid, block.Hash, fee.String(), tx.Time, txStreamVins, txStreamVouts)
 		client.Index().Index("tx").Type("tx").BodyJson(txstreaParams).Refresh("true").Do(ctx) // add txstream item
 	}
 }
