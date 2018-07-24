@@ -129,14 +129,8 @@ type AddressWithValueInTx struct {
 	Value   float64 `json:"value"`
 }
 
-// IndexVin Vin 索引
-type IndexVin struct {
-	Txid  string `json:"txid"` // vout 所在的 txid
-	Index uint32 `json:"voutindex"`
-}
-
-// IndexVout vout 索引
-type IndexVout struct {
+// IndexUTXO vout 索引
+type IndexUTXO struct {
 	Txid  string
 	Index uint32
 }
@@ -271,11 +265,19 @@ func parseESVout(voutWithID *VoutWithID) ([]*AddressWithValueInTx, []interface{}
 	return txTypeVinsField, vinAddresses, vinAddressWithAmountSlice
 }
 
-func indexedVinsFun(vins []btcjson.Vin) []IndexVin {
-	var indexVins []IndexVin
+func indexedVinsFun(vins []btcjson.Vin) []IndexUTXO {
+	var IndexUTXOs []IndexUTXO
 	for _, vin := range vins {
-		item := IndexVin{vin.Txid, vin.Vout}
-		indexVins = append(indexVins, item)
+		item := IndexUTXO{vin.Txid, vin.Vout}
+		IndexUTXOs = append(IndexUTXOs, item)
 	}
-	return indexVins
+	return IndexUTXOs
+}
+
+func indexedVoutsFun(vouts []btcjson.Vout, txid string) []IndexUTXO {
+	var IndexUTXOs []IndexUTXO
+	for _, vout := range vouts {
+		IndexUTXOs = append(IndexUTXOs, IndexUTXO{txid, vout.N})
+	}
+	return IndexUTXOs
 }
