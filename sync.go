@@ -98,13 +98,13 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 	}
 }
 
-func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block *btcjson.GetBlockVerboseResult) error {
+func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
 	bulkRequest := client.Bulk()
 	var (
 		vinAddressWithAmountSlice         []*Balance
 		voutAddressWithAmountSlice        []*Balance
-		vinAddresses                      []interface{} // All addresses related with vin in a block
-		voutAddresses                     []interface{} // All addresses related with vout in a block
+		vinAddresses                      []interface{} // All addresses related with vins in a block
+		voutAddresses                     []interface{} // All addresses related with vouts in a block
 		vinBalancesWithIDs                []*BalanceWithID
 		voutBalancesWithIDs               []*BalanceWithID
 		UniqueVoutAddressesWithSumDeposit []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
@@ -118,7 +118,6 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 			fee              decimal.Decimal
 			txTypeVinsField  []*AddressWithValueInTx
 			txTypeVoutsField []*AddressWithValueInTx
-			indexVins        []IndexVin
 		)
 
 		for _, vout := range tx.Vout {
@@ -142,10 +141,10 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, from int32, block 
 		}
 
 		// get es vouts with id in elasticsearch by tx vins
-		indexVins = indexedVinsFun(tx.Vin)
-		voutWithIDs, err := client.QueryVoutWithVin(ctx, indexVins)
+		indexVins := indexedVinsFun(tx.Vin)
+		voutWithIDs, err := client.QueryVoutWithVinsOrVouts(ctx, indexVins)
 		if err != nil {
-			log.Fatalln("sync tx error, vout not found", err.Error())
+			log.Fatalln("sync tx error: vout not found", err.Error())
 		}
 		if len(voutWithIDs) <= 0 {
 			continue
