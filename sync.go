@@ -82,13 +82,13 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 	defer wg.Done()
 	ctx := context.Background()
 	bodyParams := BTCBlockWithTxDetail(block)
-	if height < (from + 5) {
+	if height <= (from + 5) {
 		// https://github.com/olivere/elastic/blob/release-branch.v6/update_test.go
 		// https://www.elastic.co/guide/en/elasticsearch/reference/5.2/docs-update.html
 		DocParams := BTCBlockWithTxDetail(block)
 		client.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
-		log.Warnln("Update block:", block.Height, block.Hash)
+		log.Warnln("rollback block:", block.Height, block.Hash)
 	} else {
 		_, err := client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
 		if err != nil {

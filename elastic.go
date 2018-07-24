@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -175,10 +174,8 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 	for _, tx := range NewBlock.Tx {
 		// es 中 vout 的 used 字段为 nil 涉及到的 vins 地址余额不用回滚
-		voutWithIDSliceForVins, err := client.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
-		if err != nil {
-			log.Warnln(err.Error())
-		}
+		voutWithIDSliceForVins, _ := client.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
+
 		// 如果 len(voutWithIDSliceForVins) 为 0 ，则表面已经回滚过了，
 		for _, voutWithID := range voutWithIDSliceForVins {
 			// rollback: update vout's used to nil
@@ -266,13 +263,15 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		}
 	}
 
-	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
-	if err != nil {
-		log.Fatalln(err.Error())
+	if bulkRequest.NumberOfActions() != 0 {
+		bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
+		if err != nil {
+			log.Fatalln(err.Error())
+		}
+		bulkResp.Updated()
+		bulkResp.Deleted()
+		bulkResp.Indexed()
 	}
-	bulkResp.Updated()
-	bulkResp.Deleted()
-	bulkResp.Indexed()
 
 	return nil
 }
@@ -282,14 +281,13 @@ func (client *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, bl
 	if _, err := client.DeleteByQuery().Index("tx").Type("tx").Query(q).Refresh("true").Do(ctx); err != nil {
 		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions from es tx type fail"}, ""))
 	}
-	fmt.Println("Delete all transaction in", blockHash, "from es tx type")
 	return nil
 }
 
 func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	ctx := context.Background()
-	if height < (from + 5) {
+	if height <= (from + 5) {
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
 	// client.BTCSyncTx(ctx, from, block)
