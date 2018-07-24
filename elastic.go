@@ -75,14 +75,14 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	return maxAggRes.Value, nil
 }
 
-func (client *elasticClientAlias) QueryVoutWithVin(ctx context.Context, indexVins []IndexVin) ([]*VoutWithID, error) {
+func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
 	q := elastic.NewBoolQuery()
-	for _, vin := range indexVins {
+	for _, vin := range IndexUTXOs {
 		qnestedBool := elastic.NewBoolQuery()
 		qnestedBool.Must(elastic.NewTermQuery("txidbelongto", vin.Txid), elastic.NewTermQuery("voutindex", vin.Index))
 		q.Should(qnestedBool)
 	}
-	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(indexVins)).Query(q).Do(ctx)
+	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(IndexUTXOs)).Query(q).Do(ctx)
 	if err != nil {
 		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
 	}
@@ -122,7 +122,7 @@ func (client *elasticClientAlias) FindVoutByVoutIndexAndBelongTxID(ctx context.C
 	return &(hit.Id), vout, nil
 }
 
-func (client *elasticClientAlias) FindBTCBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
+func (client *elasticClientAlias) FindEsBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
 	blockHeightStr := strconv.FormatInt(int64(height), 10)
 	res, err := client.Get().Index("block").Type("block").Id(blockHeightStr).Refresh("true").Do(ctx)
 	if err != nil {
@@ -145,9 +145,12 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 	bq = bq.Must(elastic.NewTermQuery("txidbelongto", vin.Txid))  // voutStream 所在的交易 ID 属于 vin 的 TxID 字段
 	bq = bq.Must(elastic.NewTermQuery("used.txid", txBelongto))   // vin 所在的交易 ID 属于 voutStream used object 中的 txid 字段
 	bq = bq.Must(elastic.NewTermQuery("used.vinindex", vin.Vout)) // vin 所在的交易输入索引属于 voutStream used object 中的 vinindex 字段
-	q := elastic.NewInnerHit().Path("used")
 
-	searchResult, err := client.Search().Index("vout").Type("vout").Query(q).Query(bq).Do(ctx)
+	// bqsrc, _ := bq.Source()
+	// bqdata, _ := json.Marshal(bqsrc)
+	// fmt.Println(string(bqdata))
+
+	searchResult, err := client.Search().Index("vout").Type("vout").Query(bq).Do(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -160,6 +163,46 @@ func (client *elasticClientAlias) FindVoutByUsedFieldAndBelongTxID(ctx context.C
 		log.Fatalln(err.Error())
 	}
 	return &(hit.Id), vout, nil
+}
+
+// FindVoutsByUsedFieldAndBelongTxID 根据 vins 的 used object 和所在交易 ID 在 voutStream type 中查找 vouts ids
+func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context.Context, vins []btcjson.Vin, txBelongto string) ([]*VoutWithID, error) {
+	if len(vins) == 1 && len(vins[0].Coinbase) != 0 && len(vins[0].Txid) == 0 {
+		return nil, errors.New("coinbase tx, vin is new and not exist in es vout Type")
+	}
+	var esVoutIDS []string
+
+	q := elastic.NewBoolQuery()
+	for _, vin := range vins {
+		bq := elastic.NewBoolQuery()
+		bq = bq.Must(elastic.NewTermQuery("txidbelongto", vin.Txid))  // voutStream 所在的交易 ID 属于 vin 的 TxID 字段
+		bq = bq.Must(elastic.NewTermQuery("used.txid", txBelongto))   // vin 所在的交易 ID 属于 voutStream used object 中的 txid 字段
+		bq = bq.Must(elastic.NewTermQuery("used.vinindex", vin.Vout)) // vin 所在的交易输入索引属于 voutStream used object 中的 vinindex 字段
+		q.Should(bq)
+	}
+
+	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(vins)).Query(q).Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(searchResult.Hits.Hits) < 1 {
+		return nil, errors.New("vout not found by the condition")
+	}
+
+	if len(searchResult.Hits.Hits) != len(vins) {
+		return nil, errors.New("vins")
+	}
+
+	var voutWithIDs []*VoutWithID
+	for _, rawHit := range searchResult.Hits.Hits {
+		newVout := new(VoutStream)
+		if err := json.Unmarshal(*rawHit.Source, newVout); err != nil {
+			log.Fatalln(err.Error())
+		}
+		esVoutIDS = append(esVoutIDS, rawHit.Id)
+		voutWithIDs = append(voutWithIDs, &VoutWithID{rawHit.Id, newVout})
+	}
+	return voutWithIDs, nil
 }
 
 func (client *elasticClientAlias) FindBalanceWithAddressOrInitWithAmount(ctx context.Context, address string, amount float64) (*string, *Balance, error) {
@@ -208,17 +251,60 @@ func (client *elasticClientAlias) UpdateVoutUsedField(ctx context.Context, id st
 }
 
 func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx context.Context, height int32) error {
-	NewBlock, err := client.FindBTCBlockByHeight(ctx, height)
+	bulkRequest := client.Bulk()
+	var (
+		vinAddresses                      []interface{} // All addresses related with vins in a block
+		voutAddresses                     []interface{} // All addresses related with vouts in a block
+		vinAddressWithAmountSlice         []*Balance
+		voutAddressWithAmountSlice        []*Balance
+		UniqueVinAddressesWithSumWithdraw []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
+		UniqueVoutAddressesWithSumDeposit []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
+		vinBalancesWithIDs                []*BalanceWithID
+		voutBalancesWithIDs               []*BalanceWithID
+	)
+
+	NewBlock, err := client.FindEsBlockByHeight(ctx, height)
 	if err != nil {
 		return err
 	}
 
-	// rollback txstream by block hash
-	if err := client.DeleteTxstreamByBlockHash(ctx, NewBlock.Hash); err != nil {
+	// rollback: delete txs in es by block hash
+	if err := client.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); err != nil {
 		return err
 	}
 
 	for _, tx := range NewBlock.Tx {
+		voutWithIDSliceForVins, err := client.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
+		if err != nil {
+			log.Warnln(err.Error())
+		}
+		for _, voutWithID := range voutWithIDSliceForVins {
+			// rollback: update vout's used to nil
+			updateVoutUsedField := elastic.NewBulkUpdateRequest().Index("vout").Type("vout").Id(voutWithID.ID).
+				Doc(map[string]interface{}{"used": nil})
+			bulkRequest.Add(updateVoutUsedField).Refresh("true")
+
+			_, vinAddressesTmp, vinAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			vinAddresses = append(vinAddresses, vinAddressesTmp...)
+			vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, vinAddressWithAmountSliceTmp...)
+		}
+
+		// get es vouts with id in elasticsearch by tx vouts
+		indexVouts := indexedVoutsFun(tx.Vout, tx.Txid)
+		voutWithIDSliceForVouts, err := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
+		if err != nil {
+			log.Fatalln("QueryVoutWithVinsOrVouts error: vout not found", err.Error())
+		}
+		for _, voutWithID := range voutWithIDSliceForVouts {
+			// rollback: delete vout
+			deleteVout := elastic.NewBulkDeleteRequest().Index("vout").Type("vout").Id(voutWithID.ID)
+			bulkRequest.Add(deleteVout)
+
+			_, voutAddressesTmp, voutAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			voutAddresses = append(voutAddresses, voutAddressesTmp...)
+			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
+		}
+
 		for _, vin := range tx.Vin {
 			if len(tx.Vin) == 1 && len(tx.Vin[0].Coinbase) != 0 && len(tx.Vin[0].Txid) == 0 {
 				continue // the vin is coinbase
@@ -227,8 +313,8 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 				fmt.Println(err.Error())
 			} else {
 				// rollback voutStream used object field
-				client.Update().Index("vout").Type("vout").Id(*voutID).Doc(map[string]interface{}{"used": nil}).
-					DocAsUpsert(true).DetectNoop(true).Refresh("true").Do(ctx)
+				// client.Update().Index("vout").Type("vout").Id(*voutID).Doc(map[string]interface{}{"used": nil}).
+				// 	DocAsUpsert(true).DetectNoop(true).Refresh("true").Do(ctx)
 				fmt.Println("rollback vout", *voutID, "used object field as null")
 
 				// arollback balance: add
@@ -244,22 +330,39 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 				continue
 			}
 			// rollback voutStream : delete the vout
-			client.Delete().Index("vout").Type("vout").Id(*voutUsedID).Refresh("true").Do(ctx)
+			// client.Delete().Index("vout").Type("vout").Id(*voutUsedID).Refresh("true").Do(ctx)
 			fmt.Println("rollback vout", *voutUsedID, "deleted", DBVout.TxIDBelongTo)
 
 			// arollback balance: sub
 			client.UpdateBTCBlanceByVout(ctx, DBVout, "sub")
 		}
 	}
+
+	// 统计块中所有交易 vin 涉及到的地址及其对应的提现余额 (balance type)
+	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
+	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	vinBalancesWithIDs = bulkQueryVinBalance
+
+	// 统计块中所有交易 vin 涉及到的地址及其对应的提现余额 (balance type)
+	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
+	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	voutBalancesWithIDs = bulkQueryVoutBalance
+
 	return nil
 }
 
-func (client *elasticClientAlias) DeleteTxstreamByBlockHash(ctx context.Context, blockHash string) error {
+func (client *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, blockHash string) error {
 	q := elastic.NewTermQuery("blockhash", blockHash)
 	if _, err := client.DeleteByQuery().Index("tx").Type("tx").Query(q).Refresh("true").Do(ctx); err != nil {
-		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions in txstream type fail"}, ""))
+		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions from es tx type fail"}, ""))
 	}
-	fmt.Println("Delete all transaction in", blockHash, "from txtream type")
+	fmt.Println("Delete all transaction in", blockHash, "from es tx type")
 	return nil
 }
 
@@ -282,7 +385,7 @@ func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block
 		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
 	}
 	// client.BTCSyncTx(ctx, from, block)
-	client.syncTx(ctx, from, block)
+	client.syncTx(ctx, block)
 	client.Flush()
 }
 
