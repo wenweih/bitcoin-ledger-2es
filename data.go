@@ -215,7 +215,14 @@ const voutMapping = `
 					"type": "long"
 				},
         "used": {
-          "type":"object"
+          "properties": {
+            "txid": {
+              "type": "text"
+            },
+            "vinindex": {
+              "type": "short"
+            }
+          }
         }
       }
     }
