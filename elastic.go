@@ -178,10 +178,12 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	}
 
 	for _, tx := range NewBlock.Tx {
+		// es 中 vout 的 used 字段为 nil 涉及到的 vins 地址余额不用回滚
 		voutWithIDSliceForVins, err := client.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
 		if err != nil {
 			log.Warnln(err.Error())
 		}
+		// 如果 len(voutWithIDSliceForVins) 为 0 ，则表面已经回滚过了，
 		for _, voutWithID := range voutWithIDSliceForVins {
 			// rollback: update vout's used to nil
 			updateVoutUsedField := elastic.NewBulkUpdateRequest().Index("vout").Type("vout").Id(voutWithID.ID).
@@ -195,6 +197,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 		// get es vouts with id in elasticsearch by tx vouts
 		indexVouts := indexedVoutsFun(tx.Vout, tx.Txid)
+		// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
 		voutWithIDSliceForVouts, err := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
 		if err != nil {
 			log.Fatalln("QueryVoutWithVinsOrVouts error: vout not found", err.Error())
@@ -227,6 +230,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	voutBalancesWithIDs = bulkQueryVoutBalance
 
 	// rollback: add to addresses related to vins addresses
+	// 通过 vin 在 vout type 的 used 字段查出来(不为 nil)的地址余额才回滚
 	bulkUpdateVinBalanceRequest := client.Bulk()
 	// update(sub)  balances related to vins addresses
 	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
@@ -235,9 +239,9 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 			if vinAddressWithSumWithdraw.Address == vinBalanceWithID.Balance.Address {
 				balance := decimal.NewFromFloat(vinBalanceWithID.Balance.Amount).Add(vinAddressWithSumWithdraw.Amount)
 				amount, _ := balance.Float64()
-				updateVinBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(vinBalanceWithID.ID).
+				updateVinBalance := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(vinBalanceWithID.ID).
 					Doc(map[string]interface{}{"amount": amount})
-				bulkUpdateVinBalanceRequest.Add(updateVinBalcne).Refresh("true")
+				bulkUpdateVinBalanceRequest.Add(updateVinBalance).Refresh("true")
 				break
 			}
 		}
@@ -252,17 +256,15 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 	// update(sub) balances related to vouts addresses
 	// len(voutAddressWithSumDeposit) >= len(voutBalanceWithID)
+	// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
 	for _, voutAddressWithSumDeposit := range UniqueVoutAddressesWithSumDeposit {
 		for _, voutBalanceWithID := range voutBalancesWithIDs {
 			if voutAddressWithSumDeposit.Address == voutBalanceWithID.Balance.Address {
 				balance := decimal.NewFromFloat(voutBalanceWithID.Balance.Amount).Sub(voutAddressWithSumDeposit.Amount)
 				amount, _ := balance.Float64()
-				if amount < 0 {
-					log.Fatalln("rollback vout balance error")
-				}
-				updateVinBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(voutBalanceWithID.ID).
+				updateVinBalance := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(voutBalanceWithID.ID).
 					Doc(map[string]interface{}{"amount": amount})
-				bulkUpdateVinBalanceRequest.Add(updateVinBalcne).Refresh("true")
+				bulkRequest.Add(updateVinBalance).Refresh("true")
 				break
 			}
 		}
