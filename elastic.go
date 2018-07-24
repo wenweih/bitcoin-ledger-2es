@@ -354,6 +354,56 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	}
 	voutBalancesWithIDs = bulkQueryVoutBalance
 
+	// rollback: add to addresses related to vins addresses
+	bulkUpdateVinBalanceRequest := client.Bulk()
+	// update(sub)  balances related to vins addresses
+	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
+	for _, vinAddressWithSumWithdraw := range UniqueVinAddressesWithSumWithdraw {
+		for _, vinBalanceWithID := range vinBalancesWithIDs {
+			if vinAddressWithSumWithdraw.Address == vinBalanceWithID.Balance.Address {
+				balance := decimal.NewFromFloat(vinBalanceWithID.Balance.Amount).Add(vinAddressWithSumWithdraw.Amount)
+				amount, _ := balance.Float64()
+				updateVinBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(vinBalanceWithID.ID).
+					Doc(map[string]interface{}{"amount": amount})
+				bulkUpdateVinBalanceRequest.Add(updateVinBalcne).Refresh("true")
+				break
+			}
+		}
+	}
+	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
+		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
+		if e != nil {
+			log.Fatalln(err.Error())
+		}
+		bulkUpdateVinBalanceResp.Updated()
+	}
+
+	// update(sub) balances related to vouts addresses
+	// len(voutAddressWithSumDeposit) >= len(voutBalanceWithID)
+	for _, voutAddressWithSumDeposit := range UniqueVoutAddressesWithSumDeposit {
+		for _, voutBalanceWithID := range voutBalancesWithIDs {
+			if voutAddressWithSumDeposit.Address == voutBalanceWithID.Balance.Address {
+				balance := decimal.NewFromFloat(voutBalanceWithID.Balance.Amount).Sub(voutAddressWithSumDeposit.Amount)
+				amount, _ := balance.Float64()
+				if amount < 0 {
+					log.Fatalln("rollback vout balance error")
+				}
+				updateVinBalcne := elastic.NewBulkUpdateRequest().Index("balance").Type("balance").Id(voutBalanceWithID.ID).
+					Doc(map[string]interface{}{"amount": amount})
+				bulkUpdateVinBalanceRequest.Add(updateVinBalcne).Refresh("true")
+				break
+			}
+		}
+	}
+
+	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	bulkResp.Updated()
+	bulkResp.Deleted()
+	bulkResp.Indexed()
+
 	return nil
 }
 
