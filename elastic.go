@@ -138,10 +138,6 @@ func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context
 		return nil, errors.New("vout not found by the condition")
 	}
 
-	if len(searchResult.Hits.Hits) != len(vins) {
-		return nil, errors.New("vins")
-	}
-
 	var voutWithIDs []*VoutWithID
 	for _, rawHit := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
