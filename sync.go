@@ -44,13 +44,13 @@ func Sync() {
 	agg, err := eClient.MaxAgg("height", "block", "block")
 	if err != nil {
 		log.Warnln(err.Error(), ",resync from genesis block")
-		btcClient.BTCReSetSync(info.Headers, eClient)
+		btcClient.ReSetSync(info.Headers, eClient)
 		return
 	}
 	DBCurrentHeight = *agg
 	syncIndex := strconv.FormatFloat(DBCurrentHeight-5, 'f', -1, 64)
 	if SyncBeginRecord, err := eClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background()); err != nil || !SyncBeginRecord.Found {
-		btcClient.BTCReSetSync(info.Headers, eClient)
+		btcClient.ReSetSync(info.Headers, eClient)
 	} else {
 		// 数据库倒退 5 个块再同步
 		btcClient.SyncConcurrency(int32(DBCurrentHeight-5), info.Headers, eClient)
@@ -70,15 +70,26 @@ func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticCli
 			wg.Add(2)
 			// 这个地址交易数据比较明显，
 			// 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			go elasticClient.BTCRollBackAndSyncTx(from, height, block, &wg)
-			go elasticClient.BTCRollBackAndSyncBlock(from, height, block, &wg)
+			go elasticClient.RollBackAndSyncTx(from, height, block, &wg)
+			go elasticClient.RollBackAndSyncBlock(from, height, block, &wg)
 		}
 		wg.Wait()
 		sugar.Info("Dump block ", block.Height, " ", block.Hash, " dumpBlockTimeElapsed ", time.Since(dumpBlockTime))
 	}
 }
 
-func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+	ctx := context.Background()
+	if height <= (from + 5) {
+		esClient.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
+	}
+	// client.BTCSyncTx(ctx, from, block)
+	esClient.syncTx(ctx, block)
+	esClient.Flush()
+}
+
+func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	ctx := context.Background()
 	bodyParams := BTCBlockWithTxDetail(block)
@@ -86,20 +97,20 @@ func (client *elasticClientAlias) BTCRollBackAndSyncBlock(from, height int32, bl
 		// https://github.com/olivere/elastic/blob/release-branch.v6/update_test.go
 		// https://www.elastic.co/guide/en/elasticsearch/reference/5.2/docs-update.html
 		DocParams := BTCBlockWithTxDetail(block)
-		client.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
+		esClient.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
 		log.Warnln("rollback block:", block.Height, block.Hash)
 	} else {
-		_, err := client.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
+		_, err := esClient.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
 		if err != nil {
 			log.Fatalln("write doc error", err.Error())
 		}
-		client.Flush()
+		esClient.Flush()
 	}
 }
 
-func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
-	bulkRequest := client.Bulk()
+func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
+	bulkRequest := esClient.Bulk()
 	var (
 		vinAddressWithAmountSlice         []*Balance
 		voutAddressWithAmountSlice        []*Balance
@@ -139,12 +150,11 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.Get
 			voutAddresses = append(voutAddresses, voutAddressesTmp...)
 			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
 		}
-
 		// get es vouts with id in elasticsearch by tx vins
 		indexVins := indexedVinsFun(tx.Vin)
-		voutWithIDs, err := client.QueryVoutWithVinsOrVouts(ctx, indexVins)
+		voutWithIDs, err := esClient.QueryVoutWithVinsOrVoutsUnlimitSize(ctx, indexVins)
 		if err != nil {
-			log.Fatalln("sync tx error: vout not found", err.Error())
+			log.Fatalln("sync tx error:", err.Error())
 		}
 		if len(voutWithIDs) <= 0 {
 			continue
@@ -178,7 +188,7 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.Get
 
 	// 统计块中所有交易 vin 涉及到的地址及其对应的余额 (balance type)
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
-	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
+	bulkQueryVinBalance, err := esClient.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
@@ -191,7 +201,7 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.Get
 		log.Fatalln("There are duplicate records in balances type")
 	}
 
-	bulkUpdateVinBalanceRequest := client.Bulk()
+	bulkUpdateVinBalanceRequest := esClient.Bulk()
 	// update(sub)  balances related to vins addresses
 	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
 	for _, vinAddressWithSumWithdraw := range UniqueVinAddressesWithSumWithdraw {
@@ -218,7 +228,7 @@ func (client *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.Get
 
 	// 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
-	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
+	bulkQueryVoutBalance, err := esClient.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
 		log.Fatalln(err.Error())
 	}

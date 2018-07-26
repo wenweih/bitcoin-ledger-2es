@@ -33,7 +33,7 @@ func (conf *configure) bitcoinClient() *rpcclient.Client {
 	return client
 }
 
-func (btcClient *bitcoinClientAlias) BTCReSetSync(hightest int32, elasticClient *elasticClientAlias) {
+func (btcClient *bitcoinClientAlias) ReSetSync(hightest int32, elasticClient *elasticClientAlias) {
 	names, err := elasticClient.IndexNames()
 	ctx := context.Background()
 	if err != nil {

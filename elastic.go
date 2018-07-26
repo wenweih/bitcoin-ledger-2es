@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/olivere/elastic"
@@ -19,7 +18,8 @@ type elasticClientAlias struct {
 }
 
 func (conf configure) elasticClient() (*elasticClientAlias, error) {
-	client, err := elastic.NewClient(elastic.SetURL(conf.ElasticURL),
+	client, err := elastic.NewClient(
+		elastic.SetURL(conf.ElasticURL),
 		elastic.SetSniff(conf.ElasticSniff))
 	if err != nil {
 		return nil, err
@@ -74,6 +74,30 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	return maxAggRes.Value, nil
 }
 
+func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
+	var (
+		voutWithIDs  []*VoutWithID
+		IndexUTXOTmp []IndexUTXO
+	)
+	for len(IndexUTXOs) >= 500 {
+		IndexUTXOTmp, IndexUTXOs = IndexUTXOs[:500], IndexUTXOs[500:]
+		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOTmp)
+		if err != nil {
+			log.Fatalln("Chunks IndexUTXOs error")
+		}
+		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
+	}
+
+	if len(IndexUTXOs) > 0 {
+		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOs)
+		if err != nil {
+			log.Fatalln("Chunks IndexUTXOs error")
+		}
+		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
+	}
+	return voutWithIDs, nil
+}
+
 func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
 	q := elastic.NewBoolQuery()
 	for _, vin := range IndexUTXOs {
@@ -85,6 +109,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, 
 	if err != nil {
 		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
 	}
+
 	var voutWithIDs []*VoutWithID
 	for _, vout := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
@@ -282,17 +307,6 @@ func (client *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, bl
 		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions from es tx type fail"}, ""))
 	}
 	return nil
-}
-
-func (client *elasticClientAlias) BTCRollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
-	defer wg.Done()
-	ctx := context.Background()
-	if height <= (from + 5) {
-		client.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
-	}
-	// client.BTCSyncTx(ctx, from, block)
-	client.syncTx(ctx, block)
-	client.Flush()
 }
 
 // BulkQueryBalance query balances by address slice
