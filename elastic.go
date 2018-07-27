@@ -121,7 +121,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, 
 	return voutWithIDs, nil
 }
 
-func (client *elasticClientAlias) FindEsBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
+func (client *elasticClientAlias) QueryEsBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
 	blockHeightStr := strconv.FormatInt(int64(height), 10)
 	res, err := client.Get().Index("block").Type("block").Id(blockHeightStr).Refresh("true").Do(ctx)
 	if err != nil {
@@ -187,7 +187,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		voutBalancesWithIDs               []*BalanceWithID
 	)
 
-	NewBlock, err := client.FindEsBlockByHeight(ctx, height)
+	NewBlock, err := client.QueryEsBlockByHeight(ctx, height)
 	if err != nil {
 		return err
 	}

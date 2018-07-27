@@ -16,52 +16,65 @@ import (
 )
 
 // Sync dump bitcoin chaindata to es
-func Sync() {
-	eClient, err := config.elasticClient()
-	if err != nil {
-		log.Fatalf(err.Error())
-	}
-
-	eClient.createIndices()
-
-	c := config.bitcoinClient()
-	btcClient := bitcoinClientAlias{c}
+func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	info, err := btcClient.GetBlockChainInfo()
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
 
-	// // 134680
-	// fmt.Println(info)
-	// block, _ := btcClient.getBlock(int32(143878))
-	// if err := eClient.syncTx(context.Background(), int32(143878), block); err != nil {
-	// 	return
-	// }
-	//
-	// btcClient.SyncConcurrency(int32(134679), info.Headers, eClient)
-
 	var DBCurrentHeight float64
-	agg, err := eClient.MaxAgg("height", "block", "block")
+	agg, err := esClient.MaxAgg("height", "block", "block")
 	if err != nil {
-		if err.Error() != "query max agg error" {
-			btcClient.ReSetSync(info.Headers, eClient)
+		if err.Error() == "query max agg error" {
+			btcClient.ReSetSync(info.Headers, esClient)
+			return true
 		}
 		log.Warnln("Query max aggration error:", err.Error())
-		return
+		return false
 	}
-
 	DBCurrentHeight = *agg
-	syncIndex := strconv.FormatFloat(DBCurrentHeight-5, 'f', -1, 64)
-	SyncBeginRecord, err := eClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
+
+	heightGap := info.Headers - int32(DBCurrentHeight)
+	switch {
+	case heightGap > 0:
+		esClient.RollbacBlocks(DBCurrentHeight, 5, btcClient)
+	case heightGap == 0:
+		esBestBlock, err := esClient.QueryEsBlockByHeight(context.TODO(), info.Headers)
+		if err != nil {
+			log.Fatalln("Can't query best block in es")
+		}
+
+		nodeblock, err := btcClient.getBlock(info.Headers)
+		if err != nil {
+			log.Fatalln("Can't query block from bitcoind")
+		}
+
+		if esBestBlock.Hash != nodeblock.Hash {
+			esClient.RollbacBlocks(DBCurrentHeight, 5, btcClient)
+		}
+	case heightGap < 0:
+		log.Fatalln("bitcoind best height less than es best, something wrong")
+	}
+	return true
+}
+
+func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcClient bitcoinClientAlias) {
+	syncIndex := strconv.FormatFloat(from-float64(size), 'f', -1, 64)
+	SyncBeginRecord, err := esClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
 	if err != nil {
 		log.Fatalln("Query SyncBeginRecord error")
 	}
 
+	info, err := btcClient.GetBlockChainInfo()
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
 	if !SyncBeginRecord.Found {
-		btcClient.ReSetSync(info.Headers, eClient)
+		btcClient.ReSetSync(info.Headers, esClient)
 	} else {
 		// 数据库倒退 5 个块再同步
-		btcClient.SyncConcurrency(int32(DBCurrentHeight-5), info.Headers, eClient)
+		btcClient.SyncConcurrency(int32(int(from)-size), info.Headers, esClient)
 	}
 }
 
@@ -130,6 +143,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 		UniqueVinAddressesWithSumWithdraw []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
 	)
 
+	// TODO too slow, neet to optimization
 	for _, tx := range block.Tx {
 		var (
 			voutAmount       decimal.Decimal
@@ -147,7 +161,6 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 			}
 			createdVout := elastic.NewBulkIndexRequest().Index("vout").Type("vout").Doc(newVout)
 			bulkRequest.Add(createdVout)
-			elastic.NewSliceQuery()
 
 			// vout amount
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))
@@ -164,10 +177,6 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 		if err != nil {
 			log.Fatalln("sync tx error:", err.Error())
 		}
-		if len(voutWithIDs) <= 0 {
-			continue
-		}
-
 		for _, voutWithID := range voutWithIDs {
 			// vin amount
 			vinAmount = vinAmount.Add(decimal.NewFromFloat(voutWithID.Vout.Value))

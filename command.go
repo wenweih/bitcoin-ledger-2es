@@ -36,7 +36,22 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Parse bitcoin chaindata to elasticsearch",
 	Run: func(cmd *cobra.Command, args []string) {
-		Sync()
+		esClient, err := config.elasticClient()
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+
+		esClient.createIndices()
+
+		c := config.bitcoinClient()
+		btcClient := bitcoinClientAlias{c}
+
+		for {
+			isContinue := esClient.Sync(btcClient)
+			if !isContinue {
+				break
+			}
+		}
 	},
 }
 
