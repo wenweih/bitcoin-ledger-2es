@@ -69,7 +69,7 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	}
 	maxAggRes, found := searchResult.Aggregations.Max(aggKey)
 	if !found || maxAggRes.Value == nil {
-		return nil, errors.New(strings.Join([]string{"max", field, "in", index, typeName, "not found"}, " "))
+		return nil, errors.New("query max agg error")
 	}
 	return maxAggRes.Value, nil
 }

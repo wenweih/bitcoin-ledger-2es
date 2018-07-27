@@ -43,13 +43,21 @@ func Sync() {
 	var DBCurrentHeight float64
 	agg, err := eClient.MaxAgg("height", "block", "block")
 	if err != nil {
-		log.Warnln(err.Error(), ",resync from genesis block")
-		btcClient.ReSetSync(info.Headers, eClient)
+		if err.Error() != "query max agg error" {
+			btcClient.ReSetSync(info.Headers, eClient)
+		}
+		log.Warnln("Query max aggration error:", err.Error())
 		return
 	}
+
 	DBCurrentHeight = *agg
 	syncIndex := strconv.FormatFloat(DBCurrentHeight-5, 'f', -1, 64)
-	if SyncBeginRecord, err := eClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background()); err != nil || !SyncBeginRecord.Found {
+	SyncBeginRecord, err := eClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
+	if err != nil {
+		log.Fatalln("Query SyncBeginRecord error")
+	}
+
+	if !SyncBeginRecord.Found {
 		btcClient.ReSetSync(info.Headers, eClient)
 	} else {
 		// 数据库倒退 5 个块再同步
