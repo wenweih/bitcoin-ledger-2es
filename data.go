@@ -197,13 +197,13 @@ const voutMapping = `
 		"vout": {
       "properties": {
         "txidbelongto": {
-          "type": "text"
+          "type": "keyword"
         },
         "value": {
           "type": "double"
         },
         "voutindex": {
-          "type": "short"
+          "type": "keyword"
         },
         "coinbase": {
           "type": "boolean"
