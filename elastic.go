@@ -193,8 +193,8 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	}
 
 	// rollback: delete txs in es by block hash
-	if err := client.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); err != nil {
-		return err
+	if e := client.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); e != nil {
+		return e
 	}
 
 	for _, tx := range NewBlock.Tx {
@@ -216,9 +216,9 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		// get es vouts with id in elasticsearch by tx vouts
 		indexVouts := indexedVoutsFun(tx.Vout, tx.Txid)
 		// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
-		voutWithIDSliceForVouts, err := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
-		if err != nil {
-			log.Fatalln("QueryVoutWithVinsOrVouts error: vout not found", err.Error())
+		voutWithIDSliceForVouts, e := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
+		if e != nil {
+			log.Fatalln("QueryVoutWithVinsOrVouts error: vout not found", e.Error())
 		}
 		for _, voutWithID := range voutWithIDSliceForVouts {
 			// rollback: delete vout
