@@ -10,7 +10,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/shopspring/decimal"
-	log "github.com/sirupsen/logrus"
 )
 
 type bitcoinClientAlias struct {
@@ -28,7 +27,7 @@ func (conf *configure) bitcoinClient() *rpcclient.Client {
 
 	client, err := rpcclient.New(connCfg, nil)
 	if err != nil {
-		log.Fatal(err.Error())
+		sugar.Fatal(err.Error())
 	}
 	return client
 }
@@ -37,7 +36,7 @@ func (btcClient *bitcoinClientAlias) ReSetSync(hightest int32, elasticClient *el
 	names, err := elasticClient.IndexNames()
 	ctx := context.Background()
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 
 	for _, name := range names {

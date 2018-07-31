@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/olivere/elastic"
 	"github.com/shopspring/decimal"
-	log "github.com/sirupsen/logrus"
-	"go.uber.org/zap"
 
 	"github.com/btcsuite/btcd/btcjson"
 )
@@ -19,7 +18,7 @@ import (
 func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	info, err := btcClient.GetBlockChainInfo()
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 
 	var DBCurrentHeight float64
@@ -29,7 +28,7 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 			btcClient.ReSetSync(info.Headers, esClient)
 			return true
 		}
-		log.Warnln("Query max aggration error:", err.Error())
+		sugar.Warn(strings.Join([]string{"Query max aggration error:", err.Error()}, " "))
 		return false
 	}
 	DBCurrentHeight = *agg
@@ -41,19 +40,19 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	case heightGap == 0:
 		esBestBlock, err := esClient.QueryEsBlockByHeight(context.TODO(), info.Headers)
 		if err != nil {
-			log.Fatalln("Can't query best block in es")
+			sugar.Fatal("Can't query best block in es")
 		}
 
 		nodeblock, err := btcClient.getBlock(info.Headers)
 		if err != nil {
-			log.Fatalln("Can't query block from bitcoind")
+			sugar.Fatal("Can't query block from bitcoind")
 		}
 
 		if esBestBlock.Hash != nodeblock.Hash {
 			esClient.RollbacBlocks(DBCurrentHeight, 5, btcClient)
 		}
 	case heightGap < 0:
-		log.Fatalln("bitcoind best height less than es best, something wrong")
+		sugar.Fatal("bitcoind best height less than es best, something wrong")
 	}
 	return true
 }
@@ -62,12 +61,12 @@ func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcCli
 	syncIndex := strconv.FormatFloat(from-float64(size), 'f', -1, 64)
 	SyncBeginRecord, err := esClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
 	if err != nil {
-		log.Fatalln("Query SyncBeginRecord error")
+		sugar.Fatal("Query SyncBeginRecord error")
 	}
 
 	info, err := btcClient.GetBlockChainInfo()
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 
 	if !SyncBeginRecord.Found {
@@ -80,13 +79,11 @@ func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcCli
 
 func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
 	var wg sync.WaitGroup
-	sugar := zap.NewExample().Sugar()
-	defer sugar.Sync()
 	for height := from; height < end; height++ {
 		dumpBlockTime := time.Now()
 		block, err := btcClient.getBlock(height)
 		if err != nil {
-			log.Fatalln(err.Error())
+			sugar.Fatal(err.Error())
 		} else {
 			wg.Add(2)
 			// 这个地址交易数据比较明显，
@@ -120,11 +117,11 @@ func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, blo
 		DocParams := BTCBlockWithTxDetail(block)
 		esClient.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
 			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
-		log.Warnln("rollback block:", block.Height, block.Hash)
+		sugar.Warn(strings.Join([]string{"rollback block:", strconv.FormatInt(block.Height, 10), block.Hash}, " "))
 	} else {
 		_, err := esClient.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
 		if err != nil {
-			log.Fatalln("write doc error", err.Error())
+			sugar.Fatal(strings.Join([]string{"write doc error", err.Error()}, " "))
 		}
 		esClient.Flush()
 	}
@@ -175,7 +172,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 		indexVins := indexedVinsFun(tx.Vin)
 		voutWithIDs, err := esClient.QueryVoutWithVinsOrVoutsUnlimitSize(ctx, indexVins)
 		if err != nil {
-			log.Fatalln("sync tx error:", err.Error())
+			sugar.Fatal(strings.Join([]string{"sync tx error:", err.Error()}, " "))
 		}
 		for _, voutWithID := range voutWithIDs {
 			// vin amount
@@ -207,7 +204,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
 	bulkQueryVinBalance, err := esClient.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
 
@@ -215,7 +212,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	// 不一致则说明 balance type 中存在某个地址重复数据，此时应重新同步数据 TODO
 	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses...)
 	if len(UniqueVinAddresses) != len(vinBalancesWithIDs) {
-		log.Fatalln("There are duplicate records in balances type")
+		sugar.Fatal("There are duplicate records in balances type")
 	}
 
 	bulkUpdateVinBalanceRequest := esClient.Bulk()
@@ -238,7 +235,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
 		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
 		if e != nil {
-			log.Fatalln(err.Error())
+			sugar.Fatal(err.Error())
 		}
 		bulkUpdateVinBalanceResp.Updated()
 	}
@@ -247,7 +244,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
 	bulkQueryVoutBalance, err := esClient.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 	voutBalancesWithIDs = bulkQueryVoutBalance
 	// update(add) or insert balances related to vouts addresses
@@ -283,7 +280,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 
 	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 
 	bulkResp.Created()

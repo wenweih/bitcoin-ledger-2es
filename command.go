@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 type configure struct {
@@ -63,6 +64,8 @@ func Execute() {
 }
 
 func init() {
+	sugar = zap.NewExample().Sugar()
+	defer sugar.Sync()
 	config = new(configure)
 	config.InitConfig()
 	rootCmd.AddCommand(syncCmd)

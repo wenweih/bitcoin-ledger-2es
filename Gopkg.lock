@@ -5,7 +5,7 @@
   branch = "master"
   name = "github.com/btcsuite/btcd"
   packages = ["btcec","btcjson","chaincfg","chaincfg/chainhash","rpcclient","wire"]
-  revision = "86fed781132ac890ee03e906e4ecd5d6fa180c64"
+  revision = "9a2f9524024889e129a5422aca2cff73cb3eabf6"
 
 [[projects]]
   branch = "master"
@@ -17,7 +17,7 @@
   branch = "master"
   name = "github.com/btcsuite/btcutil"
   packages = [".","base58","bech32"]
-  revision = "d4cc87b860166d00d6b5b9e0d3b3d71d6088d4d4"
+  revision = "ab6388e0c60ae4834a1f57511e20c17b5f78be4b"
 
 [[projects]]
   branch = "master"
@@ -65,7 +65,7 @@
   branch = "master"
   name = "github.com/mailru/easyjson"
   packages = [".","buffer","jlexer","jwriter"]
-  revision = "3fdea8d05856a0c8df22ed4bc71b3219245e4485"
+  revision = "03f2033d19d5860aef995fe360ac7d395cd8ce65"
 
 [[projects]]
   branch = "master"
@@ -77,13 +77,13 @@
   branch = "master"
   name = "github.com/mitchellh/mapstructure"
   packages = ["."]
-  revision = "bb74f1db0675b241733089d5a1faa5dd8b0ef57b"
+  revision = "f15292f7a699fcc1a38a80977f80a046874ba8ac"
 
 [[projects]]
   name = "github.com/olivere/elastic"
   packages = [".","config","uritemplates"]
-  revision = "dabcc5de0a3fd6313870c223c3119e2b1e942ba3"
-  version = "v6.1.23"
+  revision = "e1da71ef4bb6941f2051f5cc1c4d3e56b1978cf3"
+  version = "v6.1.26"
 
 [[projects]]
   name = "github.com/pelletier/go-toml"
@@ -106,14 +106,8 @@
 [[projects]]
   name = "github.com/shopspring/decimal"
   packages = ["."]
-  revision = "69b3a8ad1f5f2c8bd855cb6506d18593064a346b"
-  version = "1.0.1"
-
-[[projects]]
-  name = "github.com/sirupsen/logrus"
-  packages = ["."]
-  revision = "c155da19408a8799da419ed3eeb0cb5db0ad5dbc"
-  version = "v1.0.5"
+  revision = "cd690d0c9e2447b1ef2a129a6b7b49077da89b8e"
+  version = "1.1.0"
 
 [[projects]]
   name = "github.com/spf13/afero"
@@ -172,20 +166,20 @@
 [[projects]]
   name = "go.uber.org/zap"
   packages = [".","buffer","internal/bufferpool","internal/color","internal/exit","zapcore"]
-  revision = "eeedf312bc6c57391d84767a4cd413f02a917974"
-  version = "v1.8.0"
+  revision = "4d45f9617f7d90f7a663ff21c7a4321dbe78098b"
+  version = "v1.9.0"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
-  packages = ["ripemd160","ssh/terminal"]
-  revision = "a49355c7e3f8fe157a85be2f77e6e269a0f89602"
+  packages = ["ripemd160"]
+  revision = "c126467f60eb25f8f27e5a981f32a87e3965053f"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
-  packages = ["unix","windows"]
-  revision = "ad87a3a340fa7f3bed189293fbfa7a9b7e021ae1"
+  packages = ["unix"]
+  revision = "bd9dbc187b6e1dacfdd2722a87e83093c2d7bd6e"
 
 [[projects]]
   name = "golang.org/x/text"
@@ -202,6 +196,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "668d4a36305b91373fb25c55433fda5c91d1cca0260b2d6dc3c4c2e2aa83529b"
+  inputs-digest = "1742f978ca2dcaf79248aba19dfe4489e78811efd5ff844e5a6ba3f18bc12998"
   solver-name = "gps-cdcl"
   solver-version = 1

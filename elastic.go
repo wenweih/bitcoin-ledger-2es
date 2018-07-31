@@ -10,7 +10,6 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/olivere/elastic"
 	"github.com/shopspring/decimal"
-	log "github.com/sirupsen/logrus"
 )
 
 type elasticClientAlias struct {
@@ -47,7 +46,7 @@ func (client *elasticClientAlias) createIndices() {
 			continue
 		}
 		if result.Acknowledged {
-			log.Infoln(strings.Join([]string{"Create index:", result.Index}, ""))
+			sugar.Info(strings.Join([]string{"Create index:", result.Index}, ""))
 		}
 	}
 }
@@ -83,7 +82,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx contex
 		IndexUTXOTmp, IndexUTXOs = IndexUTXOs[:500], IndexUTXOs[500:]
 		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOTmp)
 		if err != nil {
-			log.Fatalln("Chunks IndexUTXOs error")
+			sugar.Fatal("Chunks IndexUTXOs error")
 		}
 		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
 	}
@@ -91,7 +90,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx contex
 	if len(IndexUTXOs) > 0 {
 		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOs)
 		if err != nil {
-			log.Fatalln("Chunks IndexUTXOs error")
+			sugar.Fatalf("Chunks IndexUTXOs error")
 		}
 		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
 	}
@@ -114,7 +113,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, 
 	for _, vout := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
 		if err := json.Unmarshal(*vout.Source, newVout); err != nil {
-			log.Fatalln("query vouts error: unmarshal json ", err.Error())
+			sugar.Fatalf(strings.Join([]string{"query vouts error: unmarshal json ", err.Error()}, " "))
 		}
 		voutWithIDs = append(voutWithIDs, &VoutWithID{vout.Id, newVout})
 	}
@@ -166,7 +165,7 @@ func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context
 	for _, rawHit := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
 		if err := json.Unmarshal(*rawHit.Source, newVout); err != nil {
-			log.Fatalln(err.Error())
+			sugar.Fatalf(err.Error())
 		}
 		esVoutIDS = append(esVoutIDS, rawHit.Id)
 		voutWithIDs = append(voutWithIDs, &VoutWithID{rawHit.Id, newVout})
@@ -218,7 +217,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
 		voutWithIDSliceForVouts, e := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
 		if e != nil {
-			log.Fatalln("QueryVoutWithVinsOrVouts error: vout not found", e.Error())
+			sugar.Fatal(strings.Join([]string{"QueryVoutWithVinsOrVouts error: vout not found", e.Error()}, " "))
 		}
 		for _, voutWithID := range voutWithIDSliceForVouts {
 			// rollback: delete vout
@@ -235,7 +234,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
 	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatal(err.Error())
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
 
@@ -243,7 +242,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
 	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
-		log.Fatalln(err.Error())
+		sugar.Fatalf(err.Error())
 	}
 	voutBalancesWithIDs = bulkQueryVoutBalance
 
@@ -267,7 +266,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
 		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
 		if e != nil {
-			log.Fatalln(err.Error())
+			sugar.Fatalf(err.Error())
 		}
 		bulkUpdateVinBalanceResp.Updated()
 	}
@@ -291,7 +290,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	if bulkRequest.NumberOfActions() != 0 {
 		bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
 		if err != nil {
-			log.Fatalln(err.Error())
+			sugar.Fatal(err.Error())
 		}
 		bulkResp.Updated()
 		bulkResp.Deleted()
