@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +17,7 @@ import (
 func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	info, err := btcClient.GetBlockChainInfo()
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Get info error: ", err.Error())
 	}
 
 	var DBCurrentHeight float64
@@ -66,7 +65,7 @@ func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcCli
 
 	info, err := btcClient.GetBlockChainInfo()
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Get info error: ", err.Error())
 	}
 
 	if !SyncBeginRecord.Found {
@@ -83,7 +82,7 @@ func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticCli
 		dumpBlockTime := time.Now()
 		block, err := btcClient.getBlock(height)
 		if err != nil {
-			sugar.Fatal(err.Error())
+			sugar.Fatal("Get block error: ", err.Error())
 		} else {
 			wg.Add(2)
 			// 这个地址交易数据比较明显，
@@ -127,7 +126,7 @@ func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, blo
 	}
 }
 
-func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
+func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) {
 	bulkRequest := esClient.Bulk()
 	var (
 		vinAddressWithAmountSlice         []*Balance
@@ -157,7 +156,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 				continue
 			}
 			createdVout := elastic.NewBulkIndexRequest().Index("vout").Type("vout").Doc(newVout)
-			bulkRequest.Add(createdVout)
+			bulkRequest.Add(createdVout).Refresh("true")
 
 			// vout amount
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))
@@ -168,6 +167,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 			voutAddresses = append(voutAddresses, voutAddressesTmp...)
 			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
 		}
+
 		// get es vouts with id in elasticsearch by tx vins
 		indexVins := indexedVinsFun(tx.Vin)
 		voutWithIDs, err := esClient.QueryVoutWithVinsOrVoutsUnlimitSize(ctx, indexVins)
@@ -187,24 +187,24 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 			vinAddresses = append(vinAddresses, vinAddressesTmp...)
 			vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, vinAddressWithAmountSliceTmp...)
 		}
-
 		// caculate tx fee
 		fee = vinAmount.Sub(voutAmount)
 		if len(tx.Vin) == 1 && len(tx.Vin[0].Coinbase) != 0 && len(tx.Vin[0].Txid) == 0 || vinAmount.Equal(voutAmount) {
 			fee = decimal.NewFromFloat(0)
 		}
 
+		esFee, _ := fee.Float64()
 		// bulk insert tx docutment
-		txBulk := esTxFun(tx.Txid, block.Hash, fee.String(), tx.Time, txTypeVinsField, txTypeVoutsField)
+		txBulk := esTxFun(tx.Txid, block.Hash, esFee, tx.Time, txTypeVinsField, txTypeVoutsField)
 		createdTx := elastic.NewBulkIndexRequest().Index("tx").Type("tx").Doc(txBulk)
-		bulkRequest.Add(createdTx)
+		bulkRequest.Add(createdTx).Refresh("true")
 	}
 
 	// 统计块中所有交易 vin 涉及到的地址及其对应的余额 (balance type)
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
 	bulkQueryVinBalance, err := esClient.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Query balance related with vin error: ", err.Error())
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
 
@@ -235,7 +235,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
 		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
 		if e != nil {
-			sugar.Fatal(err.Error())
+			sugar.Fatal("update vin balance error: ", err.Error())
 		}
 		bulkUpdateVinBalanceResp.Updated()
 	}
@@ -244,7 +244,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
 	bulkQueryVoutBalance, err := esClient.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Query balance related with vouts address error: ", err.Error())
 	}
 	voutBalancesWithIDs = bulkQueryVoutBalance
 	// update(add) or insert balances related to vouts addresses
@@ -280,12 +280,10 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 
 	bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("bulk request error: ", err.Error())
 	}
 
 	bulkResp.Created()
 	bulkResp.Updated()
 	bulkResp.Indexed()
-
-	return errors.New("test error")
 }

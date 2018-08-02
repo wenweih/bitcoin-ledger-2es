@@ -149,19 +149,19 @@ const txMapping = `
 		"tx": {
       "properties": {
         "txid": {
-          "type": "text"
+          "type": "keyword"
         },
         "fee": {
           "type": "double"
         },
 				"blockhash": {
-					"type": "text"
+					"type": "keyword"
 				},
         "vins": {
           "type": "nested",
           "properties": {
             "address": {
-              "type": "text"
+              "type": "keyword"
             },
             "value": {
               "type": "double"
@@ -172,7 +172,7 @@ const txMapping = `
           "type": "nested",
           "properties": {
             "address": {
-              "type": "text"
+              "type": "keyword"
             },
             "value": {
               "type": "double"
@@ -217,7 +217,7 @@ const voutMapping = `
         "used": {
           "properties": {
             "txid": {
-              "type": "text"
+              "type": "keyword"
             },
             "vinindex": {
               "type": "short"

@@ -19,6 +19,8 @@ type elasticClientAlias struct {
 func (conf configure) elasticClient() (*elasticClientAlias, error) {
 	client, err := elastic.NewClient(
 		elastic.SetURL(conf.ElasticURL),
+		// elastic.SetErrorLog(log.New(os.Stderr, "ELASTIC ", log.LstdFlags)),
+		// elastic.SetInfoLog(log.New(os.Stdout, "", log.LstdFlags)),
 		elastic.SetSniff(conf.ElasticSniff))
 	if err != nil {
 		return nil, err
@@ -86,7 +88,6 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx contex
 		}
 		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
 	}
-
 	if len(IndexUTXOs) > 0 {
 		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOs)
 		if err != nil {
@@ -100,9 +101,10 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx contex
 func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
 	q := elastic.NewBoolQuery()
 	for _, vin := range IndexUTXOs {
-		qnestedBool := elastic.NewBoolQuery()
-		qnestedBool.Must(elastic.NewTermQuery("txidbelongto", vin.Txid), elastic.NewTermQuery("voutindex", vin.Index))
-		q.Should(qnestedBool)
+		bq := elastic.NewBoolQuery()
+		bq.Must(elastic.NewTermQuery("txidbelongto", vin.Txid))
+		bq.Must(elastic.NewTermQuery("voutindex", vin.Index))
+		q.Should(bq)
 	}
 	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(IndexUTXOs)).Query(q).Do(ctx)
 	if err != nil {
@@ -165,7 +167,7 @@ func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context
 	for _, rawHit := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
 		if err := json.Unmarshal(*rawHit.Source, newVout); err != nil {
-			sugar.Fatalf(err.Error())
+			sugar.Fatal("rallback: unmarshal es vout error", err.Error())
 		}
 		esVoutIDS = append(esVoutIDS, rawHit.Id)
 		voutWithIDs = append(voutWithIDs, &VoutWithID{rawHit.Id, newVout})
@@ -222,7 +224,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		for _, voutWithID := range voutWithIDSliceForVouts {
 			// rollback: delete vout
 			deleteVout := elastic.NewBulkDeleteRequest().Index("vout").Type("vout").Id(voutWithID.ID)
-			bulkRequest.Add(deleteVout)
+			bulkRequest.Add(deleteVout).Refresh("true")
 
 			_, voutAddressesTmp, voutAddressWithAmountSliceTmp := parseESVout(voutWithID)
 			voutAddresses = append(voutAddresses, voutAddressesTmp...)
@@ -234,15 +236,15 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
 	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Rollback: query vin balance error: ", err.Error())
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
 
-	// 统计块中所有交易 vin 涉及到的地址及其对应的提现余额 (balance type)
+	// 统计块中所有交易 vout 涉及到的地址及其对应的提现余额 (balance type)
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
 	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
-		sugar.Fatalf(err.Error())
+		sugar.Fatal("Rollback: query vout balance error: ", err.Error())
 	}
 	voutBalancesWithIDs = bulkQueryVoutBalance
 
@@ -266,7 +268,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	if bulkUpdateVinBalanceRequest.NumberOfActions() != 0 {
 		bulkUpdateVinBalanceResp, e := bulkUpdateVinBalanceRequest.Refresh("true").Do(ctx)
 		if e != nil {
-			sugar.Fatalf(err.Error())
+			sugar.Fatal("Rollback: update vin balance error: ", err.Error())
 		}
 		bulkUpdateVinBalanceResp.Updated()
 	}
@@ -290,7 +292,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	if bulkRequest.NumberOfActions() != 0 {
 		bulkResp, err := bulkRequest.Refresh("true").Do(ctx)
 		if err != nil {
-			sugar.Fatal(err.Error())
+			sugar.Fatal("Rollback: bulkRequest do error: ", err.Error())
 		}
 		bulkResp.Updated()
 		bulkResp.Deleted()

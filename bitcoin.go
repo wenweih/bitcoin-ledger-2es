@@ -135,9 +135,9 @@ type IndexUTXO struct {
 }
 
 // TxStream type struct
-type TxStream struct {
+type esTx struct {
 	Txid      string                  `json:"txid"`
-	Fee       string                  `json:"fee"`
+	Fee       float64                 `json:"fee"`
 	BlockHash string                  `json:"blockhash"`
 	Time      int64                   `json:"time"`
 	Vins      []*AddressWithValueInTx `json:"vins"`
@@ -207,8 +207,8 @@ func newVoutFun(vout btcjson.Vout, vins []btcjson.Vin, TxID string) (*VoutStream
 }
 
 //  elasticsearch 中 txstream Type 数据
-func esTxFun(txid, blockHash, fee string, time int64, simpleVins, simpleVouts []*AddressWithValueInTx) *TxStream {
-	result := &TxStream{
+func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simpleVouts []*AddressWithValueInTx) *esTx {
+	result := &esTx{
 		Txid:      txid,
 		Fee:       fee,
 		BlockHash: blockHash,
