@@ -103,27 +103,23 @@ func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block 
 	}
 	// client.BTCSyncTx(ctx, from, block)
 	esClient.syncTx(ctx, block)
-	esClient.Flush()
 }
 
 func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
-	defer wg.Done()
 	ctx := context.Background()
-	bodyParams := BTCBlockWithTxDetail(block)
 	if height <= (from + 5) {
-		// https://github.com/olivere/elastic/blob/release-branch.v6/update_test.go
-		// https://www.elastic.co/guide/en/elasticsearch/reference/5.2/docs-update.html
-		DocParams := BTCBlockWithTxDetail(block)
-		esClient.Update().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).
-			Doc(DocParams).DocAsUpsert(true).Upsert(DocParams).DetectNoop(true).Refresh("true").Do(ctx)
-		sugar.Warn(strings.Join([]string{"rollback block:", strconv.FormatInt(block.Height, 10), block.Hash}, " "))
-	} else {
-		_, err := esClient.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
-		if err != nil {
-			sugar.Fatal(strings.Join([]string{"write doc error", err.Error()}, " "))
+		_, err := esClient.Delete().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).Refresh("true").Do(ctx)
+		if err != nil && err.Error() != "elastic: Error 404 (Not Found)" {
+			sugar.Fatal("Delete block docutment error: ", err.Error())
 		}
-		esClient.Flush()
+
 	}
+	bodyParams := BTCBlockWithTxDetail(block)
+	_, err := esClient.Index().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).BodyJson(bodyParams).Do(ctx)
+	if err != nil {
+		sugar.Fatal(strings.Join([]string{"Dump block docutment error", err.Error()}, " "))
+	}
+	defer wg.Done()
 }
 
 func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) {

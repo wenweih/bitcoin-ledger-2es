@@ -27,7 +27,7 @@ func (conf *configure) bitcoinClient() *rpcclient.Client {
 
 	client, err := rpcclient.New(connCfg, nil)
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("bitcoind client err: ", err.Error())
 	}
 	return client
 }
@@ -36,7 +36,7 @@ func (btcClient *bitcoinClientAlias) ReSetSync(hightest int32, elasticClient *el
 	names, err := elasticClient.IndexNames()
 	ctx := context.Background()
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("ctx error: ", err.Error())
 	}
 
 	for _, name := range names {
@@ -151,6 +151,7 @@ type voutUsed struct {
 
 // BTCBlockWithTxDetail elasticsearch 中 block Type 数据
 func BTCBlockWithTxDetail(block *btcjson.GetBlockVerboseResult) interface{} {
+	txs := blockTx(block.Tx)
 	blockWithTx := map[string]interface{}{
 		"hash":         block.Hash,
 		"strippedsize": block.StrippedSize,
@@ -165,9 +166,75 @@ func BTCBlockWithTxDetail(block *btcjson.GetBlockVerboseResult) interface{} {
 		"difficulty":   block.Difficulty,
 		"previoushash": block.PreviousHash,
 		"nexthash":     block.NextHash,
-		"tx":           block.Tx,
+		"tx":           txs,
 	}
 	return blockWithTx
+}
+
+func blockTx(txs []btcjson.TxRawResult) []map[string]interface{} {
+	var rawTxs []map[string]interface{}
+	for _, tx := range txs {
+		// https://tradeblock.com/blog/bitcoin-0-8-5-released-provides-critical-bug-fixes/
+		txVersion := tx.Version
+		if tx.Version < 0 {
+			txVersion = 1
+		}
+		vouts := txVouts(tx)
+		vins := txVins(tx)
+		rawTxs = append(rawTxs, map[string]interface{}{
+			"hex":      tx.Hex,
+			"txid":     tx.Txid,
+			"hash":     tx.Hash,
+			"version":  txVersion,
+			"size":     tx.Size,
+			"vsize":    tx.Vsize,
+			"locktime": tx.LockTime,
+			"vout":     vouts,
+			"vin":      vins,
+		})
+	}
+	return rawTxs
+}
+
+func txVouts(tx btcjson.TxRawResult) []map[string]interface{} {
+	var vouts []map[string]interface{}
+	for _, vout := range tx.Vout {
+		vouts = append(vouts, map[string]interface{}{
+			"value": vout.Value,
+			"n":     vout.N,
+			"scriptPubKey": map[string]interface{}{
+				"asm":       vout.ScriptPubKey.Asm,
+				"hex":       vout.ScriptPubKey.Hex,
+				"reqSigs":   vout.ScriptPubKey.ReqSigs,
+				"type":      vout.ScriptPubKey.Type,
+				"addresses": vout.ScriptPubKey.Addresses,
+			},
+		})
+	}
+	return vouts
+}
+
+func txVins(tx btcjson.TxRawResult) []map[string]interface{} {
+	var vins []map[string]interface{}
+	for _, vin := range tx.Vin {
+		if len(tx.Vin) == 1 && len(vin.Coinbase) != 0 && len(vin.Txid) == 0 {
+			vins = append(vins, map[string]interface{}{
+				"coinbase": vin.Coinbase,
+				"sequence": vin.Sequence,
+			})
+			break
+		}
+		vins = append(vins, map[string]interface{}{
+			"txid": vin.Txid,
+			"vout": vin.Vout,
+			"scriptSig": map[string]interface{}{
+				"asm": vin.ScriptSig.Asm,
+				"hex": vin.ScriptSig.Hex,
+			},
+			"sequence": vin.Sequence,
+		})
+	}
+	return vins
 }
 
 // get addresses in bitcoin vout

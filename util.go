@@ -8,7 +8,7 @@ import (
 func HomeDir() string {
 	home, err := homedir.Dir()
 	if err != nil {
-		sugar.Fatal(err.Error())
+		sugar.Fatal("Home Dir error: ", err.Error())
 	}
 	return home
 }

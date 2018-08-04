@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"log"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -39,7 +36,7 @@ var syncCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		esClient, err := config.elasticClient()
 		if err != nil {
-			log.Fatalf(err.Error())
+			sugar.Fatal("es client error: ", err.Error())
 		}
 
 		esClient.createIndices()
@@ -50,8 +47,10 @@ var syncCmd = &cobra.Command{
 		for {
 			isContinue := esClient.Sync(btcClient)
 			if !isContinue {
+				sugar.Error("break syncing")
 				break
 			}
+			esClient.Flush()
 		}
 	},
 }
@@ -59,7 +58,7 @@ var syncCmd = &cobra.Command{
 // Execute 命令行入口
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalf(err.Error())
+		sugar.Fatal("Command execute error: ", err.Error())
 	}
 }
 
@@ -74,15 +73,15 @@ func init() {
 func (conf *configure) InitConfig() {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(HomeDir())
-	viper.SetConfigName("bitcoin-service")
+	viper.SetConfigName("bitcoin-chaindata-2es")
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.
 	err := viper.ReadInConfig()
 	if err == nil {
-		fmt.Println("Using Configure file:", viper.ConfigFileUsed())
+		sugar.Info("Using Configure file:", viper.ConfigFileUsed())
 	} else {
-		log.Fatal("Error: bitcoin.yml not found in: ", HomeDir())
+		sugar.Fatal("Error: bitcoin.yml not found in:", HomeDir())
 	}
 
 	for key, value := range viper.AllSettings() {

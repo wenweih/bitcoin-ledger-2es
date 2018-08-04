@@ -36,10 +36,10 @@ const blockMapping = `
               "type": "text"
             },
             "txid": {
-              "type": "text"
+              "type": "keyword"
             },
             "hash": {
-              "type": "text"
+              "type": "keyword"
             },
             "version": {
               "type": "short"
@@ -56,7 +56,7 @@ const blockMapping = `
             "vin": {
               "properties": {
                 "txid": {
-                  "type": "text"
+                  "type": "keyword"
                 },
                 "vout": {
                   "type": "short"
@@ -129,10 +129,10 @@ const blockMapping = `
           "type": "text"
         },
         "previoushash": {
-          "type": "text"
+          "type": "keyword"
         },
         "nexthash": {
-          "type": "text"
+          "type": "keyword"
         }
       }
     }

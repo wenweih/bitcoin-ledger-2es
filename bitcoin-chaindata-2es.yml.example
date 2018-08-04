@@ -1,0 +1,8 @@
+btc_host: "127.0.0.1"
+btc_port: "8888"
+btc_usr: ""
+btc_pass: ""
+btc_http_mode: true
+btc_disable_tls: true
+elastic_url: "http://host:port"
+elastic_sniff: false
