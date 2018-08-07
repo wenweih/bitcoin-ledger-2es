@@ -29,7 +29,7 @@ func (conf configure) elasticClient() (*elasticClientAlias, error) {
 	return &elasticClient, nil
 }
 
-func (client *elasticClientAlias) createIndices() {
+func (esClient *elasticClientAlias) createIndices() {
 	ctx := context.Background()
 	for _, index := range []string{"block", "tx", "vout", "balance"} {
 		var mapping string
@@ -43,7 +43,7 @@ func (client *elasticClientAlias) createIndices() {
 		case "balance":
 			mapping = balanceMapping
 		}
-		result, err := client.CreateIndex(index).BodyString(mapping).Do(ctx)
+		result, err := esClient.CreateIndex(index).BodyString(mapping).Do(ctx)
 		if err != nil {
 			continue
 		}
@@ -53,13 +53,13 @@ func (client *elasticClientAlias) createIndices() {
 	}
 }
 
-func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float64, error) {
+func (esClient *elasticClientAlias) MaxAgg(field, index, typeName string) (*float64, error) {
 	ctx := context.Background()
 	hightestAgg := elastic.NewMaxAggregation().Field(field)
 	aggKey := strings.Join([]string{"max", field}, "_")
 	// Get Query params https://github.com/olivere/elastic/blob/release-branch.v6/search_aggs_metrics_max_test.go
 	// https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-aggregations-metrics-max-aggregation.html
-	searchResult, err := client.Search().
+	searchResult, err := esClient.Search().
 		Index(index).Type(typeName).
 		Query(elastic.NewMatchAllQuery()).
 		Aggregation(aggKey, hightestAgg).
@@ -75,21 +75,21 @@ func (client *elasticClientAlias) MaxAgg(field, index, typeName string) (*float6
 	return maxAggRes.Value, nil
 }
 
-func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
 	var (
 		voutWithIDs  []*VoutWithID
 		IndexUTXOTmp []IndexUTXO
 	)
 	for len(IndexUTXOs) >= 500 {
 		IndexUTXOTmp, IndexUTXOs = IndexUTXOs[:500], IndexUTXOs[500:]
-		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOTmp)
+		voutWithIDsTmp, err := esClient.QueryVoutWithVinsOrVouts(ctx, IndexUTXOTmp)
 		if err != nil {
 			sugar.Fatal("Chunks IndexUTXOs error")
 		}
 		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
 	}
 	if len(IndexUTXOs) > 0 {
-		voutWithIDsTmp, err := client.QueryVoutWithVinsOrVouts(ctx, IndexUTXOs)
+		voutWithIDsTmp, err := esClient.QueryVoutWithVinsOrVouts(ctx, IndexUTXOs)
 		if err != nil {
 			sugar.Fatalf("Chunks IndexUTXOs error")
 		}
@@ -98,7 +98,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx contex
 	return voutWithIDs, nil
 }
 
-func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
 	q := elastic.NewBoolQuery()
 	for _, vin := range IndexUTXOs {
 		bq := elastic.NewBoolQuery()
@@ -106,7 +106,7 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, 
 		bq.Must(elastic.NewTermQuery("voutindex", vin.Index))
 		q.Should(bq)
 	}
-	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(IndexUTXOs)).Query(q).Do(ctx)
+	searchResult, err := esClient.Search().Index("vout").Type("vout").Size(len(IndexUTXOs)).Query(q).Do(ctx)
 	if err != nil {
 		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
 	}
@@ -122,9 +122,9 @@ func (client *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, 
 	return voutWithIDs, nil
 }
 
-func (client *elasticClientAlias) QueryEsBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
+func (esClient *elasticClientAlias) QueryEsBlockByHeight(ctx context.Context, height int32) (*btcjson.GetBlockVerboseResult, error) {
 	blockHeightStr := strconv.FormatInt(int64(height), 10)
-	res, err := client.Get().Index("block").Type("block").Id(blockHeightStr).Refresh("true").Do(ctx)
+	res, err := esClient.Get().Index("block").Type("block").Id(blockHeightStr).Refresh("true").Do(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (client *elasticClientAlias) QueryEsBlockByHeight(ctx context.Context, heig
 }
 
 // FindVoutsByUsedFieldAndBelongTxID 根据 vins 的 used object 和所在交易 ID 在 voutStream type 中查找 vouts ids
-func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context.Context, vins []btcjson.Vin, txBelongto string) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context.Context, vins []btcjson.Vin, txBelongto string) ([]*VoutWithID, error) {
 	if len(vins) == 1 && len(vins[0].Coinbase) != 0 && len(vins[0].Txid) == 0 {
 		return nil, errors.New("coinbase tx, vin is new and not exist in es vout Type")
 	}
@@ -155,7 +155,7 @@ func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context
 		q.Should(bq)
 	}
 
-	searchResult, err := client.Search().Index("vout").Type("vout").Size(len(vins)).Query(q).Do(ctx)
+	searchResult, err := esClient.Search().Index("vout").Type("vout").Size(len(vins)).Query(q).Do(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +175,8 @@ func (client *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context
 	return voutWithIDs, nil
 }
 
-func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx context.Context, height int32) error {
-	bulkRequest := client.Bulk()
+func (esClient *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx context.Context, height int32) error {
+	bulkRequest := esClient.Bulk()
 	var (
 		vinAddresses                      []interface{} // All addresses related with vins in a block
 		voutAddresses                     []interface{} // All addresses related with vouts in a block
@@ -188,19 +188,19 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		voutBalancesWithIDs               []*BalanceWithID
 	)
 
-	NewBlock, err := client.QueryEsBlockByHeight(ctx, height)
+	NewBlock, err := esClient.QueryEsBlockByHeight(ctx, height)
 	if err != nil {
 		return err
 	}
 
 	// rollback: delete txs in es by block hash
-	if e := client.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); e != nil {
+	if e := esClient.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); e != nil {
 		return e
 	}
 
 	for _, tx := range NewBlock.Tx {
 		// es 中 vout 的 used 字段为 nil 涉及到的 vins 地址余额不用回滚
-		voutWithIDSliceForVins, _ := client.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
+		voutWithIDSliceForVins, _ := esClient.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
 
 		// 如果 len(voutWithIDSliceForVins) 为 0 ，则表面已经回滚过了，
 		for _, voutWithID := range voutWithIDSliceForVins {
@@ -217,7 +217,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 		// get es vouts with id in elasticsearch by tx vouts
 		indexVouts := indexedVoutsFun(tx.Vout, tx.Txid)
 		// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
-		voutWithIDSliceForVouts, e := client.QueryVoutWithVinsOrVouts(ctx, indexVouts)
+		voutWithIDSliceForVouts, e := esClient.QueryVoutWithVinsOrVouts(ctx, indexVouts)
 		if e != nil {
 			sugar.Fatal(strings.Join([]string{"QueryVoutWithVinsOrVouts error: vout not found", e.Error()}, " "))
 		}
@@ -234,7 +234,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 	// 统计块中所有交易 vin 涉及到的地址及其对应的提现余额 (balance type)
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
-	bulkQueryVinBalance, err := client.BulkQueryBalance(ctx, vinAddresses...)
+	bulkQueryVinBalance, err := esClient.BulkQueryBalance(ctx, vinAddresses...)
 	if err != nil {
 		sugar.Fatal("Rollback: query vin balance error: ", err.Error())
 	}
@@ -242,7 +242,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 	// 统计块中所有交易 vout 涉及到的地址及其对应的提现余额 (balance type)
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
-	bulkQueryVoutBalance, err := client.BulkQueryBalance(ctx, voutAddresses...)
+	bulkQueryVoutBalance, err := esClient.BulkQueryBalance(ctx, voutAddresses...)
 	if err != nil {
 		sugar.Fatal("Rollback: query vout balance error: ", err.Error())
 	}
@@ -250,7 +250,7 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 
 	// rollback: add to addresses related to vins addresses
 	// 通过 vin 在 vout type 的 used 字段查出来(不为 nil)的地址余额才回滚
-	bulkUpdateVinBalanceRequest := client.Bulk()
+	bulkUpdateVinBalanceRequest := esClient.Bulk()
 	// update(sub)  balances related to vins addresses
 	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
 	for _, vinAddressWithSumWithdraw := range UniqueVinAddressesWithSumWithdraw {
@@ -302,16 +302,41 @@ func (client *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx con
 	return nil
 }
 
-func (client *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, blockHash string) error {
+func (esClient *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, blockHash string) error {
 	q := elastic.NewTermQuery("blockhash", blockHash)
-	if _, err := client.DeleteByQuery().Index("tx").Type("tx").Query(q).Refresh("true").Do(ctx); err != nil {
+	if _, err := esClient.DeleteByQuery().Index("tx").Type("tx").Query(q).Refresh("true").Do(ctx); err != nil {
 		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions from es tx type fail"}, ""))
 	}
 	return nil
 }
 
+// BulkQueryBalanceUnlimitSize fixed query more than 1k
+func (esClient *elasticClientAlias) BulkQueryBalanceUnlimitSize(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
+	var (
+		balanceWithIDs []*BalanceWithID
+		addressesTmp   []interface{}
+	)
+
+	for len(addresses) >= 500 {
+		addressesTmp, addresses = addresses[:500], addresses[500:]
+		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addressesTmp...)
+		if err != nil {
+			sugar.Fatal("Chunks addresses error")
+		}
+		balanceWithIDs = append(balanceWithIDs, balanceWithIDsTmp...)
+	}
+	if len(addresses) > 0 {
+		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addressesTmp...)
+		if err != nil {
+			sugar.Fatal("Chunks addresses error")
+		}
+		balanceWithIDs = append(balanceWithIDs, balanceWithIDsTmp...)
+	}
+	return balanceWithIDs, nil
+}
+
 // BulkQueryBalance query balances by address slice
-func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
+func (esClient *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
 	var (
 		balancesWithIDs []*BalanceWithID
 		qAddresses      []interface{}
@@ -323,7 +348,7 @@ func (client *elasticClientAlias) BulkQueryBalance(ctx context.Context, addresse
 	}
 
 	q := elastic.NewTermsQuery("address", qAddresses...)
-	searchResult, err := client.Search().Index("balance").Type("balance").Size(len(qAddresses)).Query(q).Do(ctx)
+	searchResult, err := esClient.Search().Index("balance").Type("balance").Size(len(qAddresses)).Query(q).Do(ctx)
 	if err != nil {
 		return nil, errors.New(strings.Join([]string{"Get balances error:", err.Error()}, " "))
 	}

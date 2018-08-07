@@ -198,18 +198,11 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 
 	// 统计块中所有交易 vin 涉及到的地址及其对应的余额 (balance type)
 	UniqueVinAddressesWithSumWithdraw = calculateUniqueAddressWithSumForVinOrVout(vinAddresses, vinAddressWithAmountSlice)
-	bulkQueryVinBalance, err := esClient.BulkQueryBalance(ctx, vinAddresses...)
+	bulkQueryVinBalance, err := esClient.BulkQueryBalanceUnlimitSize(ctx, vinAddresses...)
 	if err != nil {
 		sugar.Fatal("Query balance related with vin error: ", err.Error())
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
-
-	// 判断去重后的区块中所有交易的 vin 涉及到的地址数量是否与从 es 数据库中查询得到的 vinBalancesWithIDs 数量是否一直
-	// 不一致则说明 balance type 中存在某个地址重复数据，此时应重新同步数据 TODO
-	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses...)
-	if len(UniqueVinAddresses) != len(vinBalancesWithIDs) {
-		sugar.Fatal("There are duplicate records in balances type")
-	}
 
 	bulkUpdateVinBalanceRequest := esClient.Bulk()
 	// update(sub)  balances related to vins addresses
@@ -238,7 +231,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 
 	// 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
 	UniqueVoutAddressesWithSumDeposit = calculateUniqueAddressWithSumForVinOrVout(voutAddresses, voutAddressWithAmountSlice)
-	bulkQueryVoutBalance, err := esClient.BulkQueryBalance(ctx, voutAddresses...)
+	bulkQueryVoutBalance, err := esClient.BulkQueryBalanceUnlimitSize(ctx, voutAddresses...)
 	if err != nil {
 		sugar.Fatal("Query balance related with vouts address error: ", err.Error())
 	}
