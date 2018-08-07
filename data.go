@@ -32,9 +32,6 @@ const blockMapping = `
         },
         "tx": {
           "properties": {
-            "hex": {
-              "type": "text"
-            },
             "txid": {
               "type": "keyword"
             },

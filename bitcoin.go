@@ -150,7 +150,7 @@ type voutUsed struct {
 }
 
 // BTCBlockWithTxDetail elasticsearch 中 block Type 数据
-func BTCBlockWithTxDetail(block *btcjson.GetBlockVerboseResult) interface{} {
+func blockWithTxDetail(block *btcjson.GetBlockVerboseResult) interface{} {
 	txs := blockTx(block.Tx)
 	blockWithTx := map[string]interface{}{
 		"hash":         block.Hash,
@@ -182,7 +182,6 @@ func blockTx(txs []btcjson.TxRawResult) []map[string]interface{} {
 		vouts := txVouts(tx)
 		vins := txVins(tx)
 		rawTxs = append(rawTxs, map[string]interface{}{
-			"hex":      tx.Hex,
 			"txid":     tx.Txid,
 			"hash":     tx.Hash,
 			"version":  txVersion,
