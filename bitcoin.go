@@ -203,7 +203,6 @@ func txVouts(tx btcjson.TxRawResult) []map[string]interface{} {
 			"n":     vout.N,
 			"scriptPubKey": map[string]interface{}{
 				"asm":       vout.ScriptPubKey.Asm,
-				"hex":       vout.ScriptPubKey.Hex,
 				"reqSigs":   vout.ScriptPubKey.ReqSigs,
 				"type":      vout.ScriptPubKey.Type,
 				"addresses": vout.ScriptPubKey.Addresses,
@@ -228,7 +227,6 @@ func txVins(tx btcjson.TxRawResult) []map[string]interface{} {
 			"vout": vin.Vout,
 			"scriptSig": map[string]interface{}{
 				"asm": vin.ScriptSig.Asm,
-				"hex": vin.ScriptSig.Hex,
 			},
 			"sequence": vin.Sequence,
 		})

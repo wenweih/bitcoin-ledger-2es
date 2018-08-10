@@ -24,7 +24,8 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	agg, err := esClient.MaxAgg("height", "block", "block")
 	if err != nil {
 		if err.Error() == "query max agg error" {
-			btcClient.ReSetSync(info.Headers, esClient)
+			sugar.Fatal("fail to query best height from es, need to resync")
+			// btcClient.ReSetSync(info.Headers, esClient)
 			return true
 		}
 		sugar.Warn(strings.Join([]string{"Query max aggration error:", err.Error()}, " "))
@@ -35,7 +36,7 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	heightGap := info.Headers - int32(DBCurrentHeight)
 	switch {
 	case heightGap > 0:
-		esClient.RollbacBlocks(DBCurrentHeight, 5, btcClient)
+		esClient.RollbackAndSync(DBCurrentHeight, 5, btcClient)
 	case heightGap == 0:
 		esBestBlock, err := esClient.QueryEsBlockByHeight(context.TODO(), info.Headers)
 		if err != nil {
@@ -48,15 +49,15 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 		}
 
 		if esBestBlock.Hash != nodeblock.Hash {
-			esClient.RollbacBlocks(DBCurrentHeight, 5, btcClient)
+			esClient.RollbackAndSync(DBCurrentHeight, 5, btcClient)
 		}
 	case heightGap < 0:
-		sugar.Fatal("bitcoind best height less than es best, something wrong")
+		sugar.Fatal("bitcoind best height block less than max block in database , something wrong")
 	}
 	return true
 }
 
-func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcClient bitcoinClientAlias) {
+func (esClient *elasticClientAlias) RollbackAndSync(from float64, size int, btcClient bitcoinClientAlias) {
 	syncIndex := strconv.FormatFloat(from-float64(size), 'f', -1, 64)
 	SyncBeginRecord, err := esClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
 	if err != nil {
@@ -69,7 +70,8 @@ func (esClient *elasticClientAlias) RollbacBlocks(from float64, size int, btcCli
 	}
 
 	if !SyncBeginRecord.Found {
-		btcClient.ReSetSync(info.Headers, esClient)
+		sugar.Fatal("can't get begin block, need to be resync")
+		// btcClient.ReSetSync(info.Headers, esClient)
 	} else {
 		// 数据库倒退 5 个块再同步
 		btcClient.SyncConcurrency(int32(int(from)-size), info.Headers, esClient)
@@ -99,10 +101,10 @@ func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block 
 	defer wg.Done()
 	ctx := context.Background()
 	if height <= (from + 5) {
-		esClient.RollbackTxVoutBalanceTypeByBlockHeight(ctx, height)
+		esClient.RollbackTxVoutBalanceByBlockHeight(ctx, height)
 	}
-	// client.BTCSyncTx(ctx, from, block)
-	esClient.syncTx(ctx, block)
+
+	esClient.syncTxVoutBalance(ctx, block)
 }
 
 func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
@@ -122,7 +124,7 @@ func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, blo
 	defer wg.Done()
 }
 
-func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.GetBlockVerboseResult) {
+func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block *btcjson.GetBlockVerboseResult) {
 	bulkRequest := esClient.Bulk()
 	var (
 		vinAddressWithAmountSlice         []*Balance
@@ -277,7 +279,7 @@ func (esClient *elasticClientAlias) syncTx(ctx context.Context, block *btcjson.G
 	bulkResp.Indexed()
 }
 
-func (esClient *elasticClientAlias) RollbackTxVoutBalanceTypeByBlockHeight(ctx context.Context, height int32) error {
+func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx context.Context, height int32) error {
 	bulkRequest := esClient.Bulk()
 	var (
 		vinAddresses                      []interface{} // All addresses related with vins in a block

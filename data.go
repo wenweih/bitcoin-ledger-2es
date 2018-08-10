@@ -62,9 +62,6 @@ const blockMapping = `
                   "properties": {
                     "asm": {
                       "type": "text"
-                    },
-                    "hex": {
-                      "type": "text"
                     }
                   }
                 },
@@ -87,9 +84,6 @@ const blockMapping = `
                 "scriptPubKey": {
                   "properties": {
                     "asm": {
-                      "type": "text"
-                    },
-                    "hex": {
                       "type": "text"
                     },
                     "reqSigs": {
