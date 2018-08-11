@@ -73,7 +73,7 @@ func init() {
 func (conf *configure) InitConfig() {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(HomeDir())
-	viper.SetConfigName("bitcoin-chaindata-2es")
+	viper.SetConfigName("btc-chaindata-2es")
 	viper.AutomaticEnv() // read in environment variables that match
 
 	// If a config file is found, read it in.

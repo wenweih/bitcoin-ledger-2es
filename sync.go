@@ -24,8 +24,7 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	agg, err := esClient.MaxAgg("height", "block", "block")
 	if err != nil {
 		if err.Error() == "query max agg error" {
-			sugar.Fatal("fail to query best height from es, need to resync")
-			// btcClient.ReSetSync(info.Headers, esClient)
+			btcClient.ReSetSync(info.Headers, esClient)
 			return true
 		}
 		sugar.Warn(strings.Join([]string{"Query max aggration error:", err.Error()}, " "))
