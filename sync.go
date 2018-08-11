@@ -205,6 +205,13 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 	}
 	vinBalancesWithIDs = bulkQueryVinBalance
 
+	// 判断去重后的区块中所有交易的 vin 涉及到的地址数量是否与从 es 数据库中查询得到的 vinBalancesWithIDs 数量是否一致
+	// 不一致则说明 balance type 中存在某个地址重复数据，此时应重新同步数据 TODO
+	UniqueVinAddresses := removeDuplicatesForSlice(vinAddresses...)
+	if len(UniqueVinAddresses) != len(vinBalancesWithIDs) {
+		sugar.Fatal("There are duplicate records in balances type")
+	}
+
 	bulkUpdateVinBalanceRequest := esClient.Bulk()
 	// update(sub)  balances related to vins addresses
 	// len(vinAddressWithSumWithdraw) == len(vinBalancesWithIDs)
