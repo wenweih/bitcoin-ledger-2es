@@ -199,7 +199,7 @@ func (esClient *elasticClientAlias) BulkQueryBalanceUnlimitSize(ctx context.Cont
 		balanceWithIDs = append(balanceWithIDs, balanceWithIDsTmp...)
 	}
 	if len(addresses) > 0 {
-		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addressesTmp...)
+		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addresses...)
 		if err != nil {
 			sugar.Fatal("Chunks addresses error")
 		}
