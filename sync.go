@@ -12,6 +12,9 @@ import (
 	"github.com/btcsuite/btcd/btcjson"
 )
 
+// ROLLBACKHEIGHT 回滚个数
+const ROLLBACKHEIGHT = 5
+
 // Sync dump bitcoin chaindata to es
 func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	info, err := btcClient.GetBlockChainInfo()
@@ -34,7 +37,7 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 	heightGap := info.Headers - int32(DBCurrentHeight)
 	switch {
 	case heightGap > 0:
-		esClient.RollbackAndSync(DBCurrentHeight, 5, btcClient)
+		esClient.RollbackAndSync(DBCurrentHeight, int(ROLLBACKHEIGHT), btcClient)
 	case heightGap == 0:
 		esBestBlock, err := esClient.QueryEsBlockByHeight(context.TODO(), info.Headers)
 		if err != nil {
@@ -47,7 +50,7 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 		}
 
 		if esBestBlock.Hash != nodeblock.Hash {
-			esClient.RollbackAndSync(DBCurrentHeight, 5, btcClient)
+			esClient.RollbackAndSync(DBCurrentHeight, int(ROLLBACKHEIGHT), btcClient)
 		}
 	case heightGap < 0:
 		sugar.Fatal("bitcoind best height block less than max block in database , something wrong")
@@ -56,8 +59,14 @@ func (esClient *elasticClientAlias) Sync(btcClient bitcoinClientAlias) bool {
 }
 
 func (esClient *elasticClientAlias) RollbackAndSync(from float64, size int, btcClient bitcoinClientAlias) {
-	syncIndex := strconv.FormatFloat(from-float64(size), 'f', -1, 64)
-	SyncBeginRecord, err := esClient.Get().Index("block").Type("block").Id(syncIndex).Do(context.Background())
+	rollbackIndex := int(from) - size
+	beginSynsIndex := int32(rollbackIndex)
+	if rollbackIndex <= 0 {
+		beginSynsIndex = 1
+	}
+
+	SyncBeginRecordIndex := strconv.FormatInt(int64(beginSynsIndex), 10)
+	SyncBeginRecord, err := esClient.Get().Index("block").Type("block").Id(SyncBeginRecordIndex).Do(context.Background())
 	if err != nil {
 		sugar.Fatal("Query SyncBeginRecord error")
 	}
@@ -69,14 +78,13 @@ func (esClient *elasticClientAlias) RollbackAndSync(from float64, size int, btcC
 
 	if !SyncBeginRecord.Found {
 		sugar.Fatal("can't get begin block, need to be resync")
-		// btcClient.ReSetSync(info.Headers, esClient)
 	} else {
 		// 数据库倒退 5 个块再同步
-		btcClient.dumpToES(int32(int(from)-size), info.Headers, esClient)
+		btcClient.dumpToES(beginSynsIndex, info.Headers, size, esClient)
 	}
 }
 
-func (btcClient *bitcoinClientAlias) dumpToES(from, end int32, elasticClient *elasticClientAlias) {
+func (btcClient *bitcoinClientAlias) dumpToES(from, end int32, size int, elasticClient *elasticClientAlias) {
 	for height := from; height < end; height++ {
 		dumpBlockTime := time.Now()
 		block, err := btcClient.getBlock(height)
@@ -85,24 +93,24 @@ func (btcClient *bitcoinClientAlias) dumpToES(from, end int32, elasticClient *el
 		}
 		// 这个地址交易数据比较明显，
 		// 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-		elasticClient.RollBackAndSyncTx(from, height, block)
-		elasticClient.RollBackAndSyncBlock(from, height, block)
+		elasticClient.RollBackAndSyncTx(from, height, size, block)
+		elasticClient.RollBackAndSyncBlock(from, height, size, block)
 		sugar.Info("Dump block ", block.Height, " ", block.Hash, " dumpBlockTimeElapsed ", time.Since(dumpBlockTime))
 	}
 }
 
-func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, size int, block *btcjson.GetBlockVerboseResult) {
 	ctx := context.Background()
-	if height <= (from + 5) {
+	if height <= (from + int32(size)) {
 		esClient.RollbackTxVoutBalanceByBlockHeight(ctx, height)
 	}
 
 	esClient.syncTxVoutBalance(ctx, block)
 }
 
-func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult) {
+func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, size int, block *btcjson.GetBlockVerboseResult) {
 	ctx := context.Background()
-	if height <= (from + 5) {
+	if height <= (from + int32(size)) {
 		_, err := esClient.Delete().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).Refresh("true").Do(ctx)
 		if err != nil && err.Error() != "elastic: Error 404 (Not Found)" {
 			sugar.Fatal("Delete block docutment error: ", err.Error())
@@ -295,7 +303,7 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx conte
 	)
 
 	NewBlock, err := esClient.QueryEsBlockByHeight(ctx, height)
-	if err != nil && height > 6 {
+	if err != nil && height > int32(ROLLBACKHEIGHT+1) {
 		sugar.Fatal("rollback block err: ", height, " block not found in es")
 	}
 

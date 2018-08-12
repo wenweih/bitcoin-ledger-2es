@@ -42,7 +42,7 @@ func (btcClient *bitcoinClientAlias) ReSetSync(hightest int32, elasticClient *el
 	}
 
 	elasticClient.createIndices()
-	btcClient.dumpToES(int32(1), hightest, elasticClient)
+	btcClient.dumpToES(int32(1), hightest, int(ROLLBACKHEIGHT), elasticClient)
 }
 
 func (btcClient *bitcoinClientAlias) getBlock(height int32) (*btcjson.GetBlockVerboseResult, error) {
