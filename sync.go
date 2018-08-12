@@ -100,9 +100,10 @@ func (btcClient *bitcoinClientAlias) dumpToES(from, end int32, size int, elastic
 }
 
 func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, size int, block *btcjson.GetBlockVerboseResult) {
+	// 回滚时，es 中 best height + 1 中的 vout, balance, tx 都需要回滚。
 	ctx := context.Background()
-	if height <= (from + int32(size)) {
-		esClient.RollbackTxVoutBalanceByBlockHeight(ctx, height)
+	if height <= (from + int32(size+1)) {
+		esClient.RollbackTxVoutBalanceByBlock(ctx, block)
 	}
 
 	esClient.syncTxVoutBalance(ctx, block)
@@ -289,7 +290,7 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 	bulkResp.Indexed()
 }
 
-func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx context.Context, height int32) error {
+func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
 	bulkRequest := esClient.Bulk()
 	var (
 		vinAddresses                      []interface{} // All addresses related with vins in a block
@@ -302,21 +303,12 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx conte
 		voutBalancesWithIDs               []*BalanceWithID
 	)
 
-	NewBlock, err := esClient.QueryEsBlockByHeight(ctx, height)
-	if err != nil && height > int32(ROLLBACKHEIGHT+1) {
-		sugar.Fatal("rollback block err: ", height, " block not found in es")
-	}
-
-	if NewBlock == nil {
-		return nil
-	}
-
 	// rollback: delete txs in es by block hash
-	if e := esClient.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); e != nil {
-		sugar.Fatal("rollback block err: ", height, " fail to delete")
+	if e := esClient.DeleteEsTxsByBlockHash(ctx, block.Hash); e != nil {
+		sugar.Fatal("rollback block err: ", block.Hash, " fail to delete")
 	}
 
-	for _, tx := range NewBlock.Tx {
+	for _, tx := range block.Tx {
 		// es 中 vout 的 used 字段为 nil 涉及到的 vins 地址余额不用回滚
 		voutWithIDSliceForVins, _ := esClient.QueryVoutsByUsedFieldAndBelongTxID(ctx, tx.Vin, tx.Txid)
 
@@ -399,7 +391,6 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx conte
 	// update(sub) balances related to vouts addresses
 	// len(voutAddressWithSumDeposit) >= len(voutBalanceWithID)
 	// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
-	sugar.Warn("UniqueVoutAddressesWithSumDeposit length: ", len(UniqueVoutAddressesWithSumDeposit), " voutBalancesWithIDs length: ", len(voutBalancesWithIDs))
 	for _, voutAddressWithSumDeposit := range UniqueVoutAddressesWithSumDeposit {
 		for _, voutBalanceWithID := range voutBalancesWithIDs {
 			if voutAddressWithSumDeposit.Address == voutBalanceWithID.Balance.Address {
