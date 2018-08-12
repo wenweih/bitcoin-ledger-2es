@@ -145,9 +145,9 @@ const txMapping = `
         "fee": {
           "type": "double"
         },
-				"blockhash": {
-					"type": "keyword"
-				},
+        "blockhash": {
+          "type": "keyword"
+        },
         "vins": {
           "type": "nested",
           "properties": {
@@ -202,9 +202,9 @@ const voutMapping = `
         "addresses": {
           "type":"keyword"
         },
-				"time": {
-					"type": "long"
-				},
+        "time": {
+          "type": "long"
+        },
         "used": {
           "properties": {
             "txid": {
@@ -227,15 +227,41 @@ const balanceMapping = `
     "number_of_replicas": 0
   },
   "mappings": {
-		"balance": {
-			"properties": {
-				"address": {
-					"type":"keyword"
-				},
-				"amount": {
-					"type": "double"
-				}
-			}
-		}
+    "balance": {
+      "properties": {
+        "address": {
+          "type":"keyword"
+        },
+        "amount": {
+          "type": "double"
+        }
+      }
+    }
+  }
+}`
+
+const balanceJournalMapping = `
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "balancejournal": {
+      "properties": {
+        "address": {
+          "type":"keyword"
+        },
+        "amount": {
+          "type": "double"
+        },
+        "txid": {
+          "type": "keyword"
+        }
+        "operate": {
+          "type": "text"
+        }
+      }
+    }
   }
 }`

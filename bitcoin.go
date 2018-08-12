@@ -94,6 +94,14 @@ type Balance struct {
 	Amount  float64 `json:"amount"`
 }
 
+// BalanceJournal 余额变更流水
+type BalanceJournal struct {
+	Address string  `json:"address"`
+	Amount  float64 `json:"amount"`
+	Operate string  `json:"operate"`
+	Txid    string  `json:"txid"`
+}
+
 // AddressWithAmount 地址-余额类型
 type AddressWithAmount struct {
 	Address string          `json:"address"`
@@ -136,12 +144,12 @@ type IndexUTXO struct {
 
 // TxStream type struct
 type esTx struct {
-	Txid      string                  `json:"txid"`
-	Fee       float64                 `json:"fee"`
-	BlockHash string                  `json:"blockhash"`
-	Time      int64                   `json:"time"`
-	Vins      []*AddressWithValueInTx `json:"vins"`
-	Vouts     []*AddressWithValueInTx `json:"vouts"`
+	Txid      string                 `json:"txid"`
+	Fee       float64                `json:"fee"`
+	BlockHash string                 `json:"blockhash"`
+	Time      int64                  `json:"time"`
+	Vins      []AddressWithValueInTx `json:"vins"`
+	Vouts     []AddressWithValueInTx `json:"vouts"`
 }
 
 type voutUsed struct {
@@ -270,8 +278,18 @@ func newVoutFun(vout btcjson.Vout, vins []btcjson.Vin, TxID string) (*VoutStream
 	return v, nil
 }
 
+func newBalanceJournalFun(address, ope, txid string, amount float64) BalanceJournal {
+	balancejournal := BalanceJournal{
+		Address: address,
+		Operate: ope,
+		Amount:  amount,
+		Txid:    txid,
+	}
+	return balancejournal
+}
+
 //  elasticsearch 中 txstream Type 数据
-func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simpleVouts []*AddressWithValueInTx) *esTx {
+func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simpleVouts []AddressWithValueInTx) *esTx {
 	result := &esTx{
 		Txid:      txid,
 		Fee:       fee,
@@ -287,15 +305,15 @@ func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simple
 // *[]*AddressWithValueInTx for elasticsearch tx Type vouts field
 // *[]interface{} all addresses related to the vout
 // *[]*Balance all addresses related to the vout with value amount
-func parseTxVout(vout btcjson.Vout) ([]*AddressWithValueInTx, []interface{}, []*Balance) {
+func parseTxVout(vout btcjson.Vout) ([]AddressWithValueInTx, []interface{}, []Balance) {
 	var (
-		txVoutsField           []*AddressWithValueInTx
+		txVoutsField           []AddressWithValueInTx
 		voutAddresses          []interface{} // All addresses related with vout in a block
-		voutAddressWithAmounts []*Balance
+		voutAddressWithAmounts []Balance
 	)
 	// vouts field in tx type
 	for _, address := range vout.ScriptPubKey.Addresses {
-		txVoutsField = append(txVoutsField, &AddressWithValueInTx{
+		txVoutsField = append(txVoutsField, AddressWithValueInTx{
 			Address: address,
 			Value:   vout.Value,
 		})
@@ -304,7 +322,7 @@ func parseTxVout(vout btcjson.Vout) ([]*AddressWithValueInTx, []interface{}, []*
 		voutAddresses = append(voutAddresses, address)
 
 		// vout addresses with amount
-		voutAddressWithAmounts = append(voutAddressWithAmounts, &Balance{address, vout.Value})
+		voutAddressWithAmounts = append(voutAddressWithAmounts, Balance{address, vout.Value})
 	}
 	return txVoutsField, voutAddresses, voutAddressWithAmounts
 }
@@ -313,17 +331,17 @@ func parseTxVout(vout btcjson.Vout) ([]*AddressWithValueInTx, []interface{}, []*
 // []*AddressWithValueInTx for elasticsearch tx Type vins field
 // []interface{} all addresses related to the vin
 // []*Balance all addresses related to the vout with value amount
-func parseESVout(voutWithID *VoutWithID) ([]*AddressWithValueInTx, []interface{}, []*Balance) {
+func parseESVout(voutWithID VoutWithID) ([]AddressWithValueInTx, []interface{}, []Balance) {
 	var (
-		txTypeVinsField           []*AddressWithValueInTx
+		txTypeVinsField           []AddressWithValueInTx
 		vinAddresses              []interface{}
-		vinAddressWithAmountSlice []*Balance
+		vinAddressWithAmountSlice []Balance
 	)
 
 	for _, address := range voutWithID.Vout.Addresses {
 		vinAddresses = append(vinAddresses, address)
-		vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, &Balance{address, voutWithID.Vout.Value})
-		txTypeVinsField = append(txTypeVinsField, &AddressWithValueInTx{address, voutWithID.Vout.Value})
+		vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, Balance{address, voutWithID.Vout.Value})
+		txTypeVinsField = append(txTypeVinsField, AddressWithValueInTx{address, voutWithID.Vout.Value})
 	}
 	return txTypeVinsField, vinAddresses, vinAddressWithAmountSlice
 }

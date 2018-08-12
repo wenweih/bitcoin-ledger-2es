@@ -31,7 +31,7 @@ func (conf configure) elasticClient() (*elasticClientAlias, error) {
 
 func (esClient *elasticClientAlias) createIndices() {
 	ctx := context.Background()
-	for _, index := range []string{"block", "tx", "vout", "balance"} {
+	for _, index := range []string{"block", "tx", "vout", "balance", "balancejournal"} {
 		var mapping string
 		switch index {
 		case "block":
@@ -42,6 +42,8 @@ func (esClient *elasticClientAlias) createIndices() {
 			mapping = voutMapping
 		case "balance":
 			mapping = balanceMapping
+		case "balancejournal":
+			mapping = balanceJournalMapping
 		}
 		result, err := esClient.CreateIndex(index).BodyString(mapping).Do(ctx)
 		if err != nil {
@@ -75,9 +77,9 @@ func (esClient *elasticClientAlias) MaxAgg(field, index, typeName string) (*floa
 	return maxAggRes.Value, nil
 }
 
-func (esClient *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx context.Context, IndexUTXOs []IndexUTXO) []VoutWithID {
 	var (
-		voutWithIDs  []*VoutWithID
+		voutWithIDs  []VoutWithID
 		IndexUTXOTmp []IndexUTXO
 	)
 	for len(IndexUTXOs) >= 500 {
@@ -95,10 +97,10 @@ func (esClient *elasticClientAlias) QueryVoutWithVinsOrVoutsUnlimitSize(ctx cont
 		}
 		voutWithIDs = append(voutWithIDs, voutWithIDsTmp...)
 	}
-	return voutWithIDs, nil
+	return voutWithIDs
 }
 
-func (esClient *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context, IndexUTXOs []IndexUTXO) ([]VoutWithID, error) {
 	q := elastic.NewBoolQuery()
 	for _, vin := range IndexUTXOs {
 		bq := elastic.NewBoolQuery()
@@ -111,13 +113,13 @@ func (esClient *elasticClientAlias) QueryVoutWithVinsOrVouts(ctx context.Context
 		return nil, errors.New(strings.Join([]string{"query vouts error:", err.Error()}, ""))
 	}
 
-	var voutWithIDs []*VoutWithID
+	var voutWithIDs []VoutWithID
 	for _, vout := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
 		if err := json.Unmarshal(*vout.Source, newVout); err != nil {
 			sugar.Fatalf(strings.Join([]string{"query vouts error: unmarshal json ", err.Error()}, " "))
 		}
-		voutWithIDs = append(voutWithIDs, &VoutWithID{vout.Id, newVout})
+		voutWithIDs = append(voutWithIDs, VoutWithID{vout.Id, newVout})
 	}
 	return voutWithIDs, nil
 }
@@ -140,7 +142,7 @@ func (esClient *elasticClientAlias) QueryEsBlockByHeight(ctx context.Context, he
 }
 
 // FindVoutsByUsedFieldAndBelongTxID 根据 vins 的 used object 和所在交易 ID 在 voutStream type 中查找 vouts ids
-func (esClient *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context.Context, vins []btcjson.Vin, txBelongto string) ([]*VoutWithID, error) {
+func (esClient *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx context.Context, vins []btcjson.Vin, txBelongto string) ([]VoutWithID, error) {
 	if len(vins) == 1 && len(vins[0].Coinbase) != 0 && len(vins[0].Txid) == 0 {
 		return nil, errors.New("coinbase tx, vin is new and not exist in es vout Type")
 	}
@@ -163,14 +165,14 @@ func (esClient *elasticClientAlias) QueryVoutsByUsedFieldAndBelongTxID(ctx conte
 		return nil, errors.New("vout not found by the condition")
 	}
 
-	var voutWithIDs []*VoutWithID
+	var voutWithIDs []VoutWithID
 	for _, rawHit := range searchResult.Hits.Hits {
 		newVout := new(VoutStream)
 		if err := json.Unmarshal(*rawHit.Source, newVout); err != nil {
 			sugar.Fatal("rallback: unmarshal es vout error", err.Error())
 		}
 		esVoutIDS = append(esVoutIDS, rawHit.Id)
-		voutWithIDs = append(voutWithIDs, &VoutWithID{rawHit.Id, newVout})
+		voutWithIDs = append(voutWithIDs, VoutWithID{rawHit.Id, newVout})
 	}
 	return voutWithIDs, nil
 }
@@ -181,6 +183,14 @@ func (esClient *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, 
 		return errors.New(strings.Join([]string{"Delete", blockHash, "'s all transactions from es tx type fail"}, ""))
 	}
 	return nil
+}
+
+func (esClient *elasticClientAlias) BulkInsertBalanceJournal(ctx context.Context, balances []Balance, bulkRequest *elastic.BulkService, tx btcjson.TxRawResult, ope string) {
+	for _, balance := range balances {
+		newBalanceJournal := newBalanceJournalFun(balance.Address, ope, tx.Txid, balance.Amount)
+		insertBalanceJournal := elastic.NewBulkIndexRequest().Index("balancejournal").Type("balancejournal").Doc(newBalanceJournal)
+		bulkRequest.Add(insertBalanceJournal).Refresh("true")
+	}
 }
 
 // BulkQueryBalanceUnlimitSize fixed query more than 1k
@@ -237,7 +247,7 @@ func (esClient *elasticClientAlias) BulkQueryBalance(ctx context.Context, addres
 }
 
 // 统计块中的所有 vout 涉及到去重后的所有地址对应充值额度
-func calculateUniqueAddressWithSumForVinOrVout(addresses []interface{}, AddressWithAmountSlice []*Balance) []*AddressWithAmount {
+func calculateUniqueAddressWithSumForVinOrVout(addresses []interface{}, AddressWithAmountSlice []Balance) []*AddressWithAmount {
 	var UniqueAddressesWithSum []*AddressWithAmount
 	UniqueAddresses := removeDuplicatesForSlice(addresses...)
 	// 统计去重后涉及到的 vout 地址及其对应的增加余额
