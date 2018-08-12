@@ -4,7 +4,6 @@ import (
 	"context"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/olivere/elastic"
@@ -73,31 +72,26 @@ func (esClient *elasticClientAlias) RollbackAndSync(from float64, size int, btcC
 		// btcClient.ReSetSync(info.Headers, esClient)
 	} else {
 		// 数据库倒退 5 个块再同步
-		btcClient.SyncConcurrency(int32(int(from)-size), info.Headers, esClient)
+		btcClient.dumpToES(int32(int(from)-size), info.Headers, esClient)
 	}
 }
 
-func (btcClient *bitcoinClientAlias) SyncConcurrency(from, end int32, elasticClient *elasticClientAlias) {
-	var wg sync.WaitGroup
+func (btcClient *bitcoinClientAlias) dumpToES(from, end int32, elasticClient *elasticClientAlias) {
 	for height := from; height < end; height++ {
 		dumpBlockTime := time.Now()
 		block, err := btcClient.getBlock(height)
 		if err != nil {
 			sugar.Fatal("Get block error: ", err.Error())
-		} else {
-			wg.Add(2)
-			// 这个地址交易数据比较明显，
-			// 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
-			go elasticClient.RollBackAndSyncTx(from, height, block, &wg)
-			go elasticClient.RollBackAndSyncBlock(from, height, block, &wg)
 		}
-		wg.Wait()
+		// 这个地址交易数据比较明显，
+		// 结合 https://blockchain.info/address/12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S 的交易数据测试验证同步逻辑 (该地址上 2009 年的交易数据)
+		elasticClient.RollBackAndSyncTx(from, height, block)
+		elasticClient.RollBackAndSyncBlock(from, height, block)
 		sugar.Info("Dump block ", block.Height, " ", block.Hash, " dumpBlockTimeElapsed ", time.Since(dumpBlockTime))
 	}
 }
 
-func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block *btcjson.GetBlockVerboseResult) {
 	ctx := context.Background()
 	if height <= (from + 5) {
 		esClient.RollbackTxVoutBalanceByBlockHeight(ctx, height)
@@ -106,7 +100,7 @@ func (esClient *elasticClientAlias) RollBackAndSyncTx(from, height int32, block 
 	esClient.syncTxVoutBalance(ctx, block)
 }
 
-func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult, wg *sync.WaitGroup) {
+func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, block *btcjson.GetBlockVerboseResult) {
 	ctx := context.Background()
 	if height <= (from + 5) {
 		_, err := esClient.Delete().Index("block").Type("block").Id(strconv.FormatInt(int64(height), 10)).Refresh("true").Do(ctx)
@@ -120,7 +114,6 @@ func (esClient *elasticClientAlias) RollBackAndSyncBlock(from, height int32, blo
 	if err != nil {
 		sugar.Fatal(strings.Join([]string{"Dump block docutment error", err.Error()}, " "))
 	}
-	defer wg.Done()
 }
 
 func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block *btcjson.GetBlockVerboseResult) {
@@ -302,13 +295,17 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlockHeight(ctx conte
 	)
 
 	NewBlock, err := esClient.QueryEsBlockByHeight(ctx, height)
-	if err != nil {
-		return err
+	if err != nil && height > 6 {
+		sugar.Fatal("rollback block err: ", height, " block not found in es")
+	}
+
+	if NewBlock == nil {
+		return nil
 	}
 
 	// rollback: delete txs in es by block hash
 	if e := esClient.DeleteEsTxsByBlockHash(ctx, NewBlock.Hash); e != nil {
-		return e
+		sugar.Fatal("rollback block err: ", height, " fail to delete")
 	}
 
 	for _, tx := range NewBlock.Tx {
