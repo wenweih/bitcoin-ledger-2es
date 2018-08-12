@@ -195,21 +195,27 @@ func (esClient *elasticClientAlias) BulkInsertBalanceJournal(ctx context.Context
 
 // BulkQueryBalanceUnlimitSize fixed query more than 1k
 func (esClient *elasticClientAlias) BulkQueryBalanceUnlimitSize(ctx context.Context, addresses ...interface{}) ([]*BalanceWithID, error) {
+	uniquAddresses := removeDuplicatesForSlice(addresses...)
+	var uniqueAddressesI []interface{}
+	for _, uniquAddressI := range uniquAddresses {
+		uniqueAddressesI = append(uniqueAddressesI, uniquAddressI)
+	}
+
 	var (
 		balanceWithIDs []*BalanceWithID
 		addressesTmp   []interface{}
 	)
 
-	for len(addresses) >= 500 {
-		addressesTmp, addresses = addresses[:500], addresses[500:]
+	for len(uniqueAddressesI) >= 500 {
+		addressesTmp, uniqueAddressesI = uniqueAddressesI[:500], uniqueAddressesI[500:]
 		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addressesTmp...)
 		if err != nil {
 			sugar.Fatal("Chunks addresses error")
 		}
 		balanceWithIDs = append(balanceWithIDs, balanceWithIDsTmp...)
 	}
-	if len(addresses) > 0 {
-		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, addresses...)
+	if len(uniqueAddressesI) > 0 {
+		balanceWithIDsTmp, err := esClient.BulkQueryBalance(ctx, uniqueAddressesI...)
 		if err != nil {
 			sugar.Fatal("Chunks addresses error")
 		}
