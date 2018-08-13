@@ -185,12 +185,18 @@ func (esClient *elasticClientAlias) DeleteEsTxsByBlockHash(ctx context.Context, 
 	return nil
 }
 
-func (esClient *elasticClientAlias) BulkInsertBalanceJournal(ctx context.Context, balances []Balance, bulkRequest *elastic.BulkService, tx btcjson.TxRawResult, ope string) {
-	for _, balance := range balances {
-		newBalanceJournal := newBalanceJournalFun(balance.Address, ope, tx.Txid, balance.Amount)
-		insertBalanceJournal := elastic.NewBulkIndexRequest().Index("balancejournal").Type("balancejournal").Doc(newBalanceJournal)
-		bulkRequest.Add(insertBalanceJournal).Refresh("true")
+func (esClient *elasticClientAlias) BulkInsertBalanceJournal(ctx context.Context, balancesWithID []AddressWithAmountAndTxid, ope string) {
+	p, err := esClient.BulkProcessor().Name("BulkInsertBalanceJournal").Workers(5).BulkActions(40000).Do(ctx)
+	if err != nil {
+		sugar.Fatal("es BulkProcessor error: ", err.Error())
 	}
+
+	for _, balanceID := range balancesWithID {
+		newBalanceJournal := newBalanceJournalFun(balanceID.Address, ope, balanceID.Txid, balanceID.Amount)
+		insertBalanceJournal := elastic.NewBulkIndexRequest().Index("balancejournal").Type("balancejournal").Doc(newBalanceJournal)
+		p.Add(insertBalanceJournal)
+	}
+	defer p.Close()
 }
 
 // BulkQueryBalanceUnlimitSize fixed query more than 1k

@@ -78,6 +78,13 @@ type AddressWithAmount struct {
 	Amount  decimal.Decimal `json:"amount"`
 }
 
+// AddressWithAmount 地址-余额类型
+type AddressWithAmountAndTxid struct {
+	Address string  `json:"address"`
+	Amount  float64 `json:"amount"`
+	Txid    string  `json:"txid"`
+}
+
 // BalanceWithID 类型
 type BalanceWithID struct {
 	ID      string  `json:"id"`
@@ -275,11 +282,12 @@ func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simple
 // *[]*AddressWithValueInTx for elasticsearch tx Type vouts field
 // *[]interface{} all addresses related to the vout
 // *[]*Balance all addresses related to the vout with value amount
-func parseTxVout(vout btcjson.Vout) ([]AddressWithValueInTx, []interface{}, []Balance) {
+func parseTxVout(vout btcjson.Vout, txid string) ([]AddressWithValueInTx, []interface{}, []Balance, []AddressWithAmountAndTxid) {
 	var (
-		txVoutsField           []AddressWithValueInTx
-		voutAddresses          []interface{} // All addresses related with vout in a block
-		voutAddressWithAmounts []Balance
+		txVoutsField                      []AddressWithValueInTx
+		voutAddresses                     []interface{} // All addresses related with vout in a block
+		voutAddressWithAmounts            []Balance
+		voutAddressWithAmountAndTxidSlice []AddressWithAmountAndTxid
 	)
 	// vouts field in tx type
 	for _, address := range vout.ScriptPubKey.Addresses {
@@ -293,27 +301,33 @@ func parseTxVout(vout btcjson.Vout) ([]AddressWithValueInTx, []interface{}, []Ba
 
 		// vout addresses with amount
 		voutAddressWithAmounts = append(voutAddressWithAmounts, Balance{address, vout.Value})
+
+		voutAddressWithAmountAndTxidSlice = append(voutAddressWithAmountAndTxidSlice, AddressWithAmountAndTxid{
+			Address: address, Amount: vout.Value, Txid: txid})
 	}
-	return txVoutsField, voutAddresses, voutAddressWithAmounts
+	return txVoutsField, voutAddresses, voutAddressWithAmounts, voutAddressWithAmountAndTxidSlice
 }
 
 // return value
 // []*AddressWithValueInTx for elasticsearch tx Type vins field
 // []interface{} all addresses related to the vin
 // []*Balance all addresses related to the vout with value amount
-func parseESVout(voutWithID VoutWithID) ([]AddressWithValueInTx, []interface{}, []Balance) {
+func parseESVout(voutWithID VoutWithID, txid string) ([]AddressWithValueInTx, []interface{}, []Balance, []AddressWithAmountAndTxid) {
 	var (
-		txTypeVinsField           []AddressWithValueInTx
-		vinAddresses              []interface{}
-		vinAddressWithAmountSlice []Balance
+		txTypeVinsField                  []AddressWithValueInTx
+		vinAddresses                     []interface{}
+		vinAddressWithAmountSlice        []Balance
+		vinAddressWithAmountAndTxidSlice []AddressWithAmountAndTxid
 	)
 
 	for _, address := range voutWithID.Vout.Addresses {
 		vinAddresses = append(vinAddresses, address)
 		vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, Balance{address, voutWithID.Vout.Value})
 		txTypeVinsField = append(txTypeVinsField, AddressWithValueInTx{address, voutWithID.Vout.Value})
+		vinAddressWithAmountAndTxidSlice = append(vinAddressWithAmountAndTxidSlice, AddressWithAmountAndTxid{
+			Address: address, Amount: voutWithID.Vout.Value, Txid: txid})
 	}
-	return txTypeVinsField, vinAddresses, vinAddressWithAmountSlice
+	return txTypeVinsField, vinAddresses, vinAddressWithAmountSlice, vinAddressWithAmountAndTxidSlice
 }
 
 func indexedVinsFun(vins []btcjson.Vin) []IndexUTXO {

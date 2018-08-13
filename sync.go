@@ -130,6 +130,8 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 	var (
 		vinAddressWithAmountSlice         []Balance
 		voutAddressWithAmountSlice        []Balance
+		voutAddressWithAmountAndTxidSlice []AddressWithAmountAndTxid
+		vinAddressWithAmountAndTxidSlice  []AddressWithAmountAndTxid
 		vinAddresses                      []interface{} // All addresses related with vins in a block
 		voutAddresses                     []interface{} // All addresses related with vouts in a block
 		vinBalancesWithIDs                []*BalanceWithID
@@ -160,10 +162,11 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 			// vout amount
 			voutAmount = voutAmount.Add(decimal.NewFromFloat(vout.Value))
 
-			txTypeVoutsFieldTmp, voutAddressesTmp, voutAddressWithAmountSliceTmp := parseTxVout(vout)
+			txTypeVoutsFieldTmp, voutAddressesTmp, voutAddressWithAmountSliceTmp, voutAddressWithAmountAndTxidSliceTmp := parseTxVout(vout, tx.Txid)
 			txTypeVoutsField = append(txTypeVoutsField, txTypeVoutsFieldTmp...)
 			voutAddresses = append(voutAddresses, voutAddressesTmp...) // vouts field in tx type
 			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
+			voutAddressWithAmountAndTxidSlice = append(voutAddressWithAmountAndTxidSlice, voutAddressWithAmountAndTxidSliceTmp...)
 		}
 
 		// get es vouts with id in elasticsearch by tx vins
@@ -178,16 +181,12 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 				Doc(map[string]interface{}{"used": voutUsed{Txid: tx.Txid, VinIndex: voutWithID.Vout.Voutindex}})
 			bulkRequest.Add(updateVoutUsedField).Refresh("true")
 
-			txTypeVinsFieldTmp, vinAddressesTmp, vinAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			txTypeVinsFieldTmp, vinAddressesTmp, vinAddressWithAmountSliceTmp, vinAddressWithAmountAndTxidSliceTmp := parseESVout(voutWithID, tx.Txid)
 			txTypeVinsField = append(txTypeVinsField, txTypeVinsFieldTmp...)
 			vinAddresses = append(vinAddresses, vinAddressesTmp...)
 			vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, vinAddressWithAmountSliceTmp...)
+			vinAddressWithAmountAndTxidSlice = append(vinAddressWithAmountAndTxidSlice, vinAddressWithAmountAndTxidSliceTmp...)
 		}
-
-		// bulk add balancejournal doc (sync vout: add balance)
-		esClient.BulkInsertBalanceJournal(ctx, voutAddressWithAmountSlice, bulkRequest, tx, "sync+")
-		// bulk add balancejournal doc (sync vin: sub balance)
-		esClient.BulkInsertBalanceJournal(ctx, vinAddressWithAmountSlice, bulkRequest, tx, "sync-")
 
 		// caculate tx fee
 		fee = vinAmount.Sub(voutAmount)
@@ -288,6 +287,11 @@ func (esClient *elasticClientAlias) syncTxVoutBalance(ctx context.Context, block
 	bulkResp.Created()
 	bulkResp.Updated()
 	bulkResp.Indexed()
+
+	// bulk add balancejournal doc (sync vout: add balance)
+	esClient.BulkInsertBalanceJournal(ctx, voutAddressWithAmountAndTxidSlice, "sync+")
+	// bulk add balancejournal doc (sync vin: sub balance)
+	esClient.BulkInsertBalanceJournal(ctx, vinAddressWithAmountAndTxidSlice, "sync-")
 }
 
 func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Context, block *btcjson.GetBlockVerboseResult) error {
@@ -297,6 +301,8 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Con
 		voutAddresses                     []interface{} // All addresses related with vouts in a block
 		vinAddressWithAmountSlice         []Balance
 		voutAddressWithAmountSlice        []Balance
+		voutAddressWithAmountAndTxidSlice []AddressWithAmountAndTxid
+		vinAddressWithAmountAndTxidSlice  []AddressWithAmountAndTxid
 		UniqueVinAddressesWithSumWithdraw []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
 		UniqueVoutAddressesWithSumDeposit []*AddressWithAmount // 统计区块中所有 vout 涉及到去重后的 vout 地址及其对应的增加余额
 		vinBalancesWithIDs                []*BalanceWithID
@@ -319,9 +325,10 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Con
 				Doc(map[string]interface{}{"used": nil})
 			bulkRequest.Add(updateVoutUsedField).Refresh("true")
 
-			_, vinAddressesTmp, vinAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			_, vinAddressesTmp, vinAddressWithAmountSliceTmp, vinAddressWithAmountAndTxidSliceTmp := parseESVout(voutWithID, tx.Txid)
 			vinAddresses = append(vinAddresses, vinAddressesTmp...)
 			vinAddressWithAmountSlice = append(vinAddressWithAmountSlice, vinAddressWithAmountSliceTmp...)
+			vinAddressWithAmountAndTxidSlice = append(vinAddressWithAmountAndTxidSlice, vinAddressWithAmountAndTxidSliceTmp...)
 		}
 
 		// get es vouts with id in elasticsearch by tx vouts
@@ -336,15 +343,11 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Con
 			deleteVout := elastic.NewBulkDeleteRequest().Index("vout").Type("vout").Id(voutWithID.ID)
 			bulkRequest.Add(deleteVout).Refresh("true")
 
-			_, voutAddressesTmp, voutAddressWithAmountSliceTmp := parseESVout(voutWithID)
+			_, voutAddressesTmp, voutAddressWithAmountSliceTmp, voutAddressWithAmountAndTxidSliceTmp := parseESVout(voutWithID, tx.Txid)
 			voutAddresses = append(voutAddresses, voutAddressesTmp...)
 			voutAddressWithAmountSlice = append(voutAddressWithAmountSlice, voutAddressWithAmountSliceTmp...)
+			voutAddressWithAmountAndTxidSlice = append(voutAddressWithAmountAndTxidSlice, voutAddressWithAmountAndTxidSliceTmp...)
 		}
-
-		// bulk add balancejournal doc (rollback vout: sub balance)
-		esClient.BulkInsertBalanceJournal(ctx, voutAddressWithAmountSlice, bulkRequest, tx, "rollback-")
-		// bulk add balancejournal doc (rollback vin: add balance)
-		esClient.BulkInsertBalanceJournal(ctx, vinAddressWithAmountSlice, bulkRequest, tx, "rollback+")
 	}
 
 	// 统计块中所有交易 vin 涉及到的地址及其对应的提现余额 (balance type)
@@ -413,6 +416,11 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Con
 		bulkResp.Deleted()
 		bulkResp.Indexed()
 	}
+
+	// bulk add balancejournal doc (rollback vout: sub balance)
+	esClient.BulkInsertBalanceJournal(ctx, voutAddressWithAmountAndTxidSlice, "rollback-")
+	// bulk add balancejournal doc (rollback vin: add balance)
+	esClient.BulkInsertBalanceJournal(ctx, vinAddressWithAmountAndTxidSlice, "rollback+")
 
 	return nil
 }
