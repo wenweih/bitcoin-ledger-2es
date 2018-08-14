@@ -78,7 +78,7 @@ type AddressWithAmount struct {
 	Amount  decimal.Decimal `json:"amount"`
 }
 
-// AddressWithAmount 地址-余额类型
+// AddressWithAmountAndTxid 地址-余额类型
 type AddressWithAmountAndTxid struct {
 	Address string  `json:"address"`
 	Amount  float64 `json:"amount"`

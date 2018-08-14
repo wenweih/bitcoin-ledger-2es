@@ -334,10 +334,8 @@ func (esClient *elasticClientAlias) RollbackTxVoutBalanceByBlock(ctx context.Con
 		// get es vouts with id in elasticsearch by tx vouts
 		indexVouts := indexedVoutsFun(tx.Vout, tx.Txid)
 		// 没有被删除的 vouts 涉及到的 vout 地址才需要回滚余额
-		voutWithIDSliceForVouts, e := esClient.QueryVoutWithVinsOrVouts(ctx, indexVouts)
-		if e != nil {
-			sugar.Fatal(strings.Join([]string{"QueryVoutWithVinsOrVouts error: vout not found", e.Error()}, " "))
-		}
+		voutWithIDSliceForVouts := esClient.QueryVoutWithVinsOrVoutsUnlimitSize(ctx, indexVouts)
+
 		for _, voutWithID := range voutWithIDSliceForVouts {
 			// rollback: delete vout
 			deleteVout := elastic.NewBulkDeleteRequest().Index("vout").Type("vout").Id(voutWithID.ID)
