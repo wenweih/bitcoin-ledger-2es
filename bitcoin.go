@@ -266,12 +266,20 @@ func newBalanceJournalFun(address, ope, txid string, amount float64) BalanceJour
 }
 
 //  elasticsearch 中 txstream Type 数据
-func esTxFun(txid, blockHash string, fee float64, time int64, simpleVins, simpleVouts []AddressWithValueInTx) *esTx {
+func esTxFun(tx btcjson.TxRawResult, blockHash string, simpleVins, simpleVouts []AddressWithValueInTx, vinAmount, voutAmount decimal.Decimal) *esTx {
+	// caculate tx fee
+	fee := vinAmount.Sub(voutAmount)
+	if len(tx.Vin) == 1 && len(tx.Vin[0].Coinbase) != 0 && len(tx.Vin[0].Txid) == 0 || vinAmount.Equal(voutAmount) {
+		fee = decimal.NewFromFloat(0)
+	}
+
+	// bulk insert tx docutment
+	esFee, _ := fee.Float64()
 	result := &esTx{
-		Txid:      txid,
-		Fee:       fee,
+		Txid:      tx.Txid,
+		Fee:       esFee,
 		BlockHash: blockHash,
-		Time:      time, // TODO: time field is nil, need to fix
+		Time:      tx.Time, // TODO: time field is nil, need to fix
 		Vins:      simpleVins,
 		Vouts:     simpleVouts,
 	}
